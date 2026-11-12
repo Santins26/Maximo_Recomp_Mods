@@ -8,7 +8,6 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -30,23 +29,35 @@ class LauncherForm : Form
     readonly Bitmap shell, buttonPlay, buttonNormal, buttonHover, buttonPressed, iconPlay;
     readonly Bitmap[] navIcons = new Bitmap[NavNames.Length];
     Bitmap banner, pageBack;
-    readonly Panel[] pages = new Panel[NavNames.Length];
+    const int BuildPage = 7; // after the menu's pages; only the Build button opens it
+    readonly Panel[] pages = new Panel[NavNames.Length + 1];
     int page = -1, hover = -2, pressed = -2; // -1 = Play, -3 = minimize, -4 = close
-    bool busy;
+    bool busy, building;
 
     readonly Label status = new Label(), tip = new Label(), lastRun = new Label();
     readonly Button setupIso = new Button(), setupFolder = new Button();
     readonly Button zipLogs = new Button(), openSaves = new Button(), openLogs = new Button(), openShots = new Button();
-    readonly CheckBox recordAudio = new CheckBox(), vu1Thread = new CheckBox(), vu1Pipeline = new CheckBox(), borderless = new CheckBox(), softParticles = new CheckBox(), vsync = new CheckBox();
+    readonly CheckBox recordAudio = new CheckBox(), vu1Thread = new CheckBox(), vu1Pipeline = new CheckBox(), borderless = new CheckBox(), softParticles = new CheckBox(), vsync = new CheckBox(), skipIntro = new CheckBox(), crossWorld = new CheckBox();
     readonly CheckBox hdTextures = new CheckBox();
-    readonly Button hdTexturesButton = new Button();
+    readonly CheckBox freeCamera = new CheckBox(), cameraInvert = new CheckBox();
+    readonly ComboBox cameraSpeed = new ComboBox(), cameraReturn = new ComboBox();
+    readonly Button hdTexturesButton = new Button(), controlsButton = new Button();
     readonly ComboBox picture = new ComboBox(), scaling = new ComboBox(), aspect = new ComboBox(), frameRate = new ComboBox();
-    readonly TextBox notes = new TextBox();
+    readonly TextBox notes = new TextBox(), buildLog = new TextBox();
+    readonly Button rebuild = new Button(), cancelBuild = new Button();
+    readonly Label buildStage = new Label();
+    readonly ProgressBar buildBar = new ProgressBar();
 
     static Bitmap Art(string name)
     {
-        using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream(name))
-        using (var image = new Bitmap(s))
+        // The art sits in .\art beside the launcher. Without it the launcher still opens, with a plain look.
+        string path = Path.Combine(Paths.Art, name);
+        if (!File.Exists(path))
+        {
+            Log.Write("art missing: " + path);
+            return new Bitmap(1, 1);
+        }
+        using (var image = new Bitmap(path))
             return new Bitmap(image);
     }
 
@@ -91,6 +102,7 @@ class LauncherForm : Form
         ShowPage(-1);
         FormClosing += delegate
         {
+            if (building) Builder.Cancel();
             Process game = Game.Running;
             try
             {
@@ -138,7 +150,7 @@ class LauncherForm : Form
         if (banner != null) g.DrawImage(banner, BannerArea);
         g.DrawImage(shell, 0, 0, DesignW, DesignH);
         if (banner == null) DrawTitle(g);
-        DrawButton(g, PlayArea, -1, "Play", iconPlay, buttonPlay, 26f);
+        DrawButton(g, PlayArea, -1, building ? "Building..." : BuildGame.Needed ? (BuildGame.CanUpdate ? "Update" : "Build") : File.Exists(Paths.Game) ? "Play" : "Build", iconPlay, buttonPlay, 26f);
         for (int i = 0; i < NavNames.Length; i++)
             DrawButton(g, NavArea(i), i, NavNames[i], navIcons[i], null, 20f);
         DrawWindowButton(g, MinimizeArea, -3, "–");
@@ -253,7 +265,7 @@ class LauncherForm : Form
     {
         if (id == -4) Close();
         else if (id == -3) WindowState = FormWindowState.Minimized;
-        else if (id == -1) Play();
+        else if (id == -1) { if (BuildGame.Needed) BuildTheGame(); else Play(); }
         else if (id >= 0) ShowPage(id == page ? -1 : id);
     }
 
@@ -262,7 +274,7 @@ class LauncherForm : Form
     protected override bool ProcessCmdKey(ref Message message, Keys key)
     {
         bool typing = ActiveControl is TextBoxBase || ActiveControl is ComboBox;
-        if (key == Keys.Escape && page >= 0) { ShowPage(-1); return true; }
+        if (key == Keys.Escape && page >= 0 && !building) { ShowPage(-1); return true; }
         if (!typing && (key == Keys.Up || key == Keys.Down))
         {
             int count = NavNames.Length + 1; // Play, then the menu
@@ -397,6 +409,25 @@ class LauncherForm : Form
         p.Controls.Add(c);
     }
 
+    // A label and a small drop-down on one row (for settings under a tick).
+    void Small(Panel p, ComboBox c, string label, object[] items, int value, int x, int y, int labelWidth, int width, Action changed)
+    {
+        Text2Label(p, label, x, y + 4, labelWidth, 30, Text1, 17f);
+        c.DropDownStyle = ComboBoxStyle.DropDownList;
+        DarkCombo(c);
+        c.Font = new Font("Segoe UI", 17f * scale, GraphicsUnit.Pixel);
+        c.Items.AddRange(items);
+        c.SelectedIndex = value;
+        c.Bounds = R(new Rectangle(x + labelWidth, y, width, 30));
+        c.SelectedIndexChanged += delegate { changed(); };
+        p.Controls.Add(c);
+    }
+
+    void RefreshCamera()
+    {
+        cameraSpeed.Enabled = cameraReturn.Enabled = cameraInvert.Enabled = freeCamera.Checked;
+    }
+
     void Action2(Panel p, Button b, string text, int x, int y, int w, EventHandler click)
     {
         b.Text = text;
@@ -423,21 +454,44 @@ class LauncherForm : Form
         Text2Label(p, "Stops the picture tearing. Turn it off only if the game feels delayed.", 56, 252, 800, 26, Text2);
 
         p = NewPage(1, "Controls");
-        Text2Label(p, "Controller", 28, 80, 900, 28, Gold, 19f);
-        Text2Label(p, "Plug it in before pressing Play. Xbox layout: A = Cross, B = Circle, X = Square, Y = Triangle.", 28, 110, 980, 30, Text1, 17f);
+        Text2Label(p, "Controller", 28, 74, 900, 28, Gold, 19f);
+        Text2Label(p, "Xbox, PlayStation (DualSense, DualShock 4) and most other controllers work. Cross / A = Cross, " +
+                      "Circle / B = Circle, and so on.", 28, 104, 980, 54, Text1, 17f);
         Text2Label(p, "Keyboard", 28, 164, 900, 28, Gold, 19f);
-        Text2Label(p, "WASD = left stick     X = Cross     Z = Square     C = Circle     V = Triangle\r\nQ / E = L1 / R1     1 / 3 = L2 / R2     Enter = Start", 28, 194, 980, 60, Text1, 17f);
-        Text2Label(p, "In the game", 28, 276, 900, 28, Gold, 19f);
-        Text2Label(p, "F12 = screenshot for the banner     Alt+Enter = fullscreen or window     Esc = quit the game", 28, 306, 980, 30, Text1, 17f);
+        Text2Label(p, "", 28, 194, 980, 84, Text1, 17f).Name = "keyboardSummary";
+        Action2(p, controlsButton, "Change controls...", 28, 284, 240, delegate
+        {
+            using (var form = new ControlsForm()) form.ShowDialog(this);
+            Text2Label(p, "Hold L1 + R1 and press Select = debug menu (free camera)", 28, 410, 980, 30, Text1, 17f);
+        RefreshControls();
+        });
+        Text2Label(p, "Keys and controller buttons, for the keyboard and any controller.", 284, 292, 720, 28, Text2);
+        Text2Label(p, "In the game", 28, 350, 900, 28, Gold, 19f);
+        Text2Label(p, "F12 = screenshot for the banner     Alt+Enter = fullscreen or window     Esc = quit the game", 28, 380, 980, 30, Text1, 17f);
+        Text2Label(p, "Hold L1 + R1 and press Select = debug menu (free camera)", 28, 410, 980, 30, Text1, 17f);
+        RefreshControls();
 
         p = NewPage(2, "Enhancements");
         Choice(p, aspect, "Aspect", Picture.AspectNames, Picture.Aspect, 80, delegate { Picture.Aspect = aspect.SelectedIndex; Picture.Save(); });
-        Choice(p, frameRate, "Frame rate", Picture.FrameRateNames, Picture.FrameRate, 126, delegate { Picture.FrameRate = frameRate.SelectedIndex; Picture.Save(); });
-        Tick(p, softParticles, "Smooth effects", Picture.SoftParticles, 28, 186, 900, delegate { Picture.SoftParticles = softParticles.Checked; Picture.Save(); });
-        Text2Label(p, "Fire, smoke, fairies and sparkles at the full upscaled resolution (not in Original).", 56, 216, 900, 26, Text2);
-        Tick(p, vu1Thread, "Faster 3D: use a second CPU core for the 3D graphics", Picture.Vu1Thread, 28, 256, 900, delegate { Picture.Vu1Thread = vu1Thread.Checked; vu1Pipeline.Enabled = vu1Thread.Checked; Picture.Save(); });
-        Tick(p, vu1Pipeline, "Overlap frames: draw each frame while the game works on the next", Picture.Vu1Pipeline, 56, 292, 870, delegate { Picture.Vu1Pipeline = vu1Pipeline.Checked; Picture.Save(); });
+        if (Picture.FrameRateNames.Length > 1) // (the USA and Japanese releases have only their own 60 Hz)
+            Choice(p, frameRate, "Frame rate", Picture.FrameRateNames, Picture.FrameRate, 126, delegate { Picture.FrameRate = frameRate.SelectedIndex; Picture.Save(); });
+        Tick(p, softParticles, "Smooth effects", Picture.SoftParticles, 28, 178, 900, delegate { Picture.SoftParticles = softParticles.Checked; Picture.Save(); });
+        Text2Label(p, "Fire, smoke, fairies and sparkles at the full upscaled resolution (not in Original).", 56, 206, 900, 24, Text2);
+        Tick(p, vu1Thread, "Faster 3D: use a second CPU core for the 3D graphics", Picture.Vu1Thread, 28, 222, 900, delegate { Picture.Vu1Thread = vu1Thread.Checked; vu1Pipeline.Enabled = vu1Thread.Checked; Picture.Save(); });
+        Tick(p, vu1Pipeline, "Overlap frames: draw each frame while the game works on the next", Picture.Vu1Pipeline, 56, 256, 870, delegate { Picture.Vu1Pipeline = vu1Pipeline.Checked; Picture.Save(); });
         vu1Pipeline.Enabled = Picture.Vu1Thread;
+        Tick(p, freeCamera, "Free camera: the right stick turns the camera around Maximo (experimental)", Picture.FreeCamera, 28, 290, 960,
+             delegate { Picture.FreeCamera = freeCamera.Checked; RefreshCamera(); Picture.Save(); });
+        Small(p, cameraSpeed, "Speed", Picture.CameraSpeedNames, Picture.CameraSpeed, 56, 326, 70, 170,
+              delegate { Picture.CameraSpeed = cameraSpeed.SelectedIndex; Picture.Save(); });
+        Small(p, cameraReturn, "Swing back behind Maximo", Picture.CameraReturnNames, Picture.CameraReturn, 330, 326, 230, 200,
+              delegate { Picture.CameraReturn = cameraReturn.SelectedIndex; Picture.Save(); });
+        tips.SetToolTip(cameraReturn, "How long after you let go of the right stick the camera turns back behind Maximo by itself");
+        Tick(p, cameraInvert, "Invert up/down", Picture.CameraInvertY, 56, 362, 400, delegate { Picture.CameraInvertY = cameraInvert.Checked; Picture.Save(); });
+        Text2Label(p, "R3 (click the right stick) swings it back at once. Keyboard: I J K L turn it, R swings it back (see Controls).", 56, 392, 900, 26, Text2);
+        RefreshCamera();
+        Tick(p, skipIntro, "Skip the intro: start at the main menu", Picture.SkipIntro, 28, 426, 900, delegate { Picture.SkipIntro = skipIntro.Checked; Picture.Save(); });
+        Text2Label(p, "Leaves out the Capcom logos, the copyright notice and the title screen.", 56, 454, 950, 26, Text2);
 
         p = NewPage(3, "HD Textures");
         Tick(p, hdTextures, "Use HD textures", HdTextures.Enabled, 28, 80, 500, delegate { HdTextures.Enabled = hdTextures.Checked; Picture.Save(); });
@@ -467,12 +521,33 @@ class LauncherForm : Form
         notes.Bounds = R(new Rectangle(28, 192, 980, 120));
         p.Controls.Add(notes);
         Action2(p, zipLogs, "Zip logs for a bug report", 28, 324, 280, delegate { ZipLogs(); });
+        Action2(p, rebuild, "Update and rebuild the game", 318, 324, 300, delegate { StartBuild(); });
         Tick(p, recordAudio, "Record the game's audio too (only for sound problems; about 11 MB a minute)", false, 28, 374, 980, delegate { });
         lastRun.BackColor = Color.Transparent;
         lastRun.ForeColor = Text2;
         lastRun.Font = new Font("Segoe UI", 15f * scale, GraphicsUnit.Pixel);
         lastRun.Bounds = R(new Rectangle(28, 412, 980, 64));
         p.Controls.Add(lastRun);
+
+        p = NewPage(BuildPage, "Building the game");
+        buildStage.BackColor = Color.Transparent;
+        buildStage.ForeColor = Text1;
+        buildStage.Font = new Font("Segoe UI", 18f * scale, GraphicsUnit.Pixel);
+        buildStage.Bounds = R(new Rectangle(28, 70, 980, 32));
+        p.Controls.Add(buildStage);
+        buildBar.Bounds = R(new Rectangle(28, 108, 980, 22));
+        p.Controls.Add(buildBar);
+        Text2Label(p, "The game is compiled here from your own disc, so this can take a while. You can use your PC meanwhile.", 28, 140, 980, 28, Text2);
+        buildLog.Multiline = true;
+        buildLog.ReadOnly = true;
+        buildLog.WordWrap = false;
+        buildLog.BackColor = Dark;
+        buildLog.ForeColor = Text2;
+        buildLog.BorderStyle = BorderStyle.FixedSingle;
+        buildLog.Font = new Font("Consolas", 13f * scale, GraphicsUnit.Pixel);
+        buildLog.Bounds = R(new Rectangle(28, 174, 980, 252));
+        p.Controls.Add(buildLog);
+        Action2(p, cancelBuild, "Cancel", 28, 436, 160, delegate { cancelBuild.Enabled = false; buildStage.Text = "Cancelling..."; Builder.Cancel(); });
 
         p = NewPage(5, "About");
         Text2Label(p, Build.Name, 28, 80, 980, 30, Text1, 19f);
@@ -496,14 +571,27 @@ class LauncherForm : Form
         Text2Label(p, "Unofficial fan project. Not affiliated with or endorsed by Capcom.", 28, 376, 980, 28, Text2);
     }
 
+    void RefreshControls()
+    {
+        Control[] found = pages[1].Controls.Find("keyboardSummary", false);
+        if (found.Length > 0) found[0].Text = Bindings.KeyboardSummary();
+    }
+
     // ---- the game ----
 
     void Refresh2()
     {
         string why;
         bool ready = Setup.DiscReady(out why);
-        if (!File.Exists(Paths.Game)) { ready = false; why = "The game isn't built yet: run build.cmd with your disc, see the README."; }
-        status.Text = ready ? why : why + " Open Game Files and choose your own Maximo PAL disc image (.iso).";
+        if (BuildGame.Needed)
+        {
+            status.Text = BuildGame.CanUpdate ? "A newer version of the mods is here: press Update (only what changed is recompiled)."
+                                              : "The game isn't built yet: press Build and choose your own Maximo disc image (.iso, .bin or .cue).";
+            status.ForeColor = Gold;
+            return;
+        }
+        if (!File.Exists(Paths.Game)) { ready = false; why = "The game isn't built yet: press Build."; }
+        status.Text = ready || !File.Exists(Paths.Game) ? why : why + " Open Game Files and choose your own Maximo " + Build.DiscTitle + " disc image (.iso, .bin or .cue).";
         status.ForeColor = ready ? Good : Bad;
     }
 
@@ -526,7 +614,8 @@ class LauncherForm : Form
     {
         busy = on;
         EnableAll(this, !on);
-        if (!on) { vu1Pipeline.Enabled = vu1Thread.Checked; Refresh2(); RefreshBanner(); }
+        cancelBuild.Enabled = building;
+        if (!on) { vu1Pipeline.Enabled = vu1Thread.Checked; RefreshCamera(); Refresh2(); RefreshBanner(); }
         Invalidate();
     }
 
@@ -553,21 +642,134 @@ class LauncherForm : Form
 
     void ChooseIso()
     {
-        using (var dialog = new OpenFileDialog { Filter = "Disc images (*.iso)|*.iso", Title = "Your Maximo: Ghosts to Glory PAL disc image" })
+        using (var dialog = new OpenFileDialog { Filter = "Disc images (*.iso, *.cue, *.bin)|*.iso;*.cue;*.bin|All files (*.*)|*.*", Title = "Your Maximo: Ghosts to Glory " + Build.DiscTitle + " disc image" })
             if (dialog.ShowDialog(this) == DialogResult.OK)
                 RunInBackground(() => Setup.Install(dialog.FileName, Progress), null);
     }
 
     void ChooseFolder()
     {
-        using (var dialog = new FolderBrowserDialog { Description = "The folder (or drive) with the extracted Maximo PAL disc, containing SLES_507.03" })
+        using (var dialog = new FolderBrowserDialog { Description = "The folder (or drive) with the extracted Maximo " + Build.DiscTitle + " disc, containing " + Build.ElfName })
             if (dialog.ShowDialog(this) == DialogResult.OK)
                 RunInBackground(() => Setup.Install(dialog.SelectedPath, Progress), null);
     }
 
-    void Play()
+    // The mod package's launcher: builds the game from the player's disc, then hands over to the launcher it built.
+    void BuildTheGame()
     {
         if (busy) return;
+        bool built;
+        using (var form = new BuildGameForm())
+        {
+            form.ShowDialog(this);
+            built = form.Succeeded;
+        }
+        if (built && BuildGame.OpenBuilt()) { Close(); return; }
+        Refresh2();
+        Invalidate();
+    }
+
+    // ---- the Build button (Builder.cs) ----
+
+    void StartBuild()
+    {
+        if (busy) return;
+        string why, iso = null;
+        if (!Setup.DiscReady(out why))
+        {
+            using (var dialog = new OpenFileDialog { Filter = "Disc images (*.iso, *.cue, *.bin)|*.iso;*.cue;*.bin|All files (*.*)|*.*", Title = "Your Maximo: Ghosts to Glory disc image" })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                iso = dialog.FileName;
+            }
+        }
+        string message = "This compiles the game on your PC from your own disc. It downloads the source code and libraries (under 1 GB) " +
+                         "and needs about 4 GB of disk space while it builds. Afterwards only the game (about 60 MB) stays. It can take a while.";
+        if (Builder.NeedsCppTools)
+            message += "\r\n\r\nYour PC also needs Microsoft's free C++ Build Tools, a further download of several GB that needs about 8 GB more. " +
+                       "Windows will ask for your permission, and they are covered by Microsoft's licence terms.";
+        if (MessageBox.Show(this, message + "\r\n\r\nStart now?", Build.Name, MessageBoxButtons.OKCancel, MessageBoxIcon.Information) != DialogResult.OK)
+            return;
+
+        var recent = new System.Collections.Generic.Queue<string>();
+        Action<string> line = text =>
+        {
+            lock (recent)
+            {
+                recent.Enqueue(text);
+                while (recent.Count > 200) recent.Dequeue();
+            }
+        };
+        Action<string, int> stage = (text, percent) =>
+        {
+            if (!IsHandleCreated) return;
+            BeginInvoke((Action)(() =>
+            {
+                if (cancelBuild.Enabled) buildStage.Text = text;
+                buildBar.Style = percent < 0 ? ProgressBarStyle.Marquee : ProgressBarStyle.Continuous;
+                if (percent >= 0) buildBar.Value = Math.Min(100, percent);
+            }));
+        };
+        var view = new System.Windows.Forms.Timer { Interval = 500 };
+        Action showLog = () =>
+        {
+            string[] shown;
+            lock (recent) shown = recent.ToArray();
+            string joined = string.Join("\r\n", shown);
+            if (joined == buildLog.Text) return;
+            buildLog.Text = joined;
+            buildLog.SelectionStart = buildLog.TextLength;
+            buildLog.ScrollToCaret();
+        };
+        view.Tick += delegate { showLog(); };
+
+        building = true;
+        buildStage.Text = "Starting...";
+        buildLog.Text = "";
+        ShowPage(BuildPage);
+        view.Start();
+        Busy(true);
+        var worker = new Thread(() =>
+        {
+            string error = null;
+            bool stopped = false;
+            try
+            {
+                if (iso != null)
+                {
+                    stage("Reading your disc", -1);
+                    Setup.Install(iso, text => stage(text, -1));
+                }
+                Builder.Run(stage, line);
+            }
+            catch (OperationCanceledException e) { stopped = true; error = e.Message; }
+            catch (Exception e) { error = e.Message; Log.Write("build: " + e); }
+            if (!IsHandleCreated) return;
+            BeginInvoke((Action)(() =>
+            {
+                view.Stop();
+                view.Dispose();
+                showLog();
+                building = false;
+                buildBar.Style = ProgressBarStyle.Continuous;
+                buildBar.Value = error == null ? 100 : 0;
+                buildStage.Text = error ?? "Done. Press Play.";
+                Busy(false);
+                if (error != null && !stopped)
+                    MessageBox.Show(this, error, Build.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                else if (error == null)
+                    ShowPage(-1);
+            }));
+        });
+        worker.IsBackground = true;
+        worker.Start();
+    }
+
+    void Play()
+    {
+        if (building) { ShowPage(BuildPage); return; }
+        if (busy) return;
+        if (!File.Exists(Paths.Game)) { StartBuild(); return; }
         if (!DiscUsable()) { ShowPage(4); return; }
         int dropIn;
         if (HdTextures.Enabled && HdTextures.DropInChanged(out dropIn))
@@ -587,6 +789,11 @@ class LauncherForm : Form
         status.ForeColor = Text1;
         status.Text = "Playing. Close the game window to stop.";
         string result = null;
+        CrossWorld.OnProgress = text => BeginInvoke((Action)(() =>
+        {
+            status.ForeColor = Text1;
+            status.Text = text ?? "Playing. Close the game window to stop.";
+        }));
         RunInBackground(() => { result = Game.Run(86400, audio); BeginInvoke((Action)(() => lastRun.Text = result)); }, null);
     }
 

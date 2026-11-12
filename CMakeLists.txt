@@ -1,4 +1,4 @@
-# Maximo: Ghosts to Glory (SLES-50703): game code recompiled from the player's disc + PS2Recomp runtime.
+# Maximo: Ghosts to Glory (SLES-50703, SLUS-20017, SLPM-62127): game code recompiled from the player's disc + PS2Recomp runtime.
 # build.cmd drives this in two steps: MAXIMO_TOOLS_ONLY builds the tools, which generate the game code; then the game.
 cmake_minimum_required(VERSION 3.21)
 project(maximo_boot LANGUAGES C CXX)
@@ -41,6 +41,12 @@ target_precompile_headers(maximo_recompiled PRIVATE
 
 add_executable(maximo_boot maximo_boot.cpp)
 target_link_libraries(maximo_boot PRIVATE maximo_recompiled dbghelp)
+# Which release the generated code is from (build.cmd reads it off the disc): maximo_region.h maps the game addresses.
+set(MAXIMO_REGION "PAL" CACHE STRING "Release of the player's disc: PAL, USA or JPN")
+set_property(CACHE MAXIMO_REGION PROPERTY STRINGS PAL USA JPN)
+if(NOT MAXIMO_REGION STREQUAL "PAL")
+    target_compile_definitions(maximo_boot PRIVATE MAXIMO_REGION_${MAXIMO_REGION}=1)
+endif()
 
 # HD texture packs (HD_TEXTURES.md): `maximo_boot --hdtex-convert` turns PCSX2 replacement packs into pack.mhtx files.
 # PNG decoding and scaling: stb (public domain, from raylib's tree); zip reading: miniz (MIT, from Granite/fossilize);

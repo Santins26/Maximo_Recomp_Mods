@@ -30,6 +30,8 @@ public:
     // that bypassed the device as fatal (onGuestFrame returns false).
     void enablePresentation();
     bool takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height);
+    // The same, with the guest frame (the onGuestFrame number) the picture was rendered for.
+    bool takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height, uint64_t &guestFrame);
 
     // GPU-mode presentation since the previous call, for the per-second log: frames published by the device,
     // frames the window took, published frames with no sample brighter than 8/255, frames without a scanout (display
@@ -40,6 +42,13 @@ public:
         uint32_t width = 0, height = 0, brightnessMean = 0, brightnessMax = 0;
     };
     Health takeHealth();
+
+    // POST EFFECTS (bloom + grade on the GPU before the readback): 0 off, 1 soft, 2 strong. Any thread.
+    static void setPostLevel(int level);
+    static int postLevel();
+    // SCENE LIGHTING (ambient occlusion from the game's Z buffer): 0 off, 1 on, 2 strong, 3 show depth, 4 show AO.
+    static void setLightLevel(int level);
+    static int lightLevel();
 
 private:
     struct Impl;

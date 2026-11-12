@@ -2,10 +2,19 @@
 /build/
 /generated/
 /dist/
+# (the USA and Japanese builds: build.cmd puts them in build-usa, generated-usa, dist-usa and -jpn)
+/build-*/
+/generated-*/
+/dist-*/
 /deps/
 /disc/
 *.iso
+*.bin
+*.cue
+*.img
 SLES_*
+SLUS_*
+SLPM_*
 *.exe
 *.dll
 *.pdb
@@ -15,3 +24,24 @@ SLES_*
 *.log
 *.wav
 __pycache__/
+# The mod package (make_mod_package.cmd)
+/mod_package/
+# The randomizer's own game files and outputs (its code, maximo1randomizer\randomizer\*.py, is shared; the cross-world
+# enemies need it). Never commit game data.
+/maximo1randomizer/game_files/
+/maximo1randomizer/output/
+/maximo1randomizer/build/
+/maximo1randomizer/dist/
+*.PSX
+*.PRS
+*.PRT
+*.BEF
+*.BD
+*.TEX
+*.IRX
+*.ELF
+# This PC's build state and backups
+/build_region.txt
+/backup_*/
+*.bak
+/maximo_boot_latest.cpp

@@ -1,15 +1,18 @@
 // maximo_kit: turns the player's own disc into the inputs of the build. Nothing it writes may ever enter git.
 //
-//   maximo_kit prepare <disc.iso or extracted folder> <repository root> <generated folder>
+//   maximo_kit prepare <disc .iso / .bin / .cue or extracted folder> <repository root> <generated folder>
 //
-// It opens the disc read-only, checks the game executable against the PAL release, and writes:
-//   <generated>/SLES_507.03          the executable, for the recompiler
-//   <generated>/recomp.toml          the recompiler's settings (data/funcs.csv names the functions)
-//   <generated>/vu1/vu1_<hash>.bin   VU1 microcode images, assembled from the executable by data/vu1/recipe.txt
+// It opens the disc read-only, checks the game executable against the three releases it knows (PAL SLES-50703,
+// USA SLUS-20017, Japan SLPM-62127), and writes:
+//   <generated>/<executable>         the executable, for the recompiler (SLES_507.03, SLUS_200.17 or SLPM_621.27)
+//   <generated>/region.txt           PAL, USA or JPN: which release it is, for build.cmd
+//   <generated>/recomp.toml          the recompiler's settings (data/funcs.csv, funcs_usa.csv or funcs_jpn.csv)
+//   <generated>/vu1/vu1_<hash>.bin   VU1 microcode images, assembled from the executable by data/vu1/recipe*.txt
 //   <generated>/vu1/vu1_<hash>.pcs   their entry points (data/vu1)
 //   <generated>/vu1aot/vu1aot_registry.cpp
 //   <generated>/vu1_images.txt       the image names, for build.cmd
 //
+//   maximo_kit region <disc>         prints PAL, USA or JPN for the disc (checked like prepare)
 //   maximo_kit sha256 <file>         prints the file's SHA-256
 #include <windows.h>
 #include <bcrypt.h>
@@ -18,6 +21,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -31,8 +35,20 @@ using Bytes = std::vector<uint8_t>;
 
 namespace
 {
-    constexpr const char *kElfName = "SLES_507.03";
-    constexpr const char *kElfSha256 = "03615557E6291B882A54165E068F653C8613856852E4250F7DE4B075ABFC3C99";
+    // The releases this build supports. The USA and Japanese function lists and VU1 recipes were made by matching
+    // their executables against the PAL one (offsets and hashes only, like the PAL files).
+    struct Release
+    {
+        const char *region, *elfName, *sha256, *title, *funcs, *recipe;
+    };
+    constexpr Release kReleases[] = {
+        {"PAL", "SLES_507.03", "03615557E6291B882A54165E068F653C8613856852E4250F7DE4B075ABFC3C99",
+         "Europe (SLES-50703)", "funcs.csv", "recipe.txt"},
+        {"USA", "SLUS_200.17", "12049EC55891ADFF413B85BCAAAC106567419146AE76CEEE88BC45E13E1B195F",
+         "USA (SLUS-20017)", "funcs_usa.csv", "recipe_usa.txt"},
+        {"JPN", "SLPM_621.27", "9F58B67B5029A93B30506B670D6C54D7C326A05A3A03780E796EA03C94A17F57",
+         "Japan (SLPM-62127)", "funcs_jpn.csv", "recipe_jpn.txt"},
+    };
     constexpr size_t kVu1ImageSize = 16 * 1024;
     constexpr uint64_t kSector = 2048;
 
@@ -70,29 +86,105 @@ namespace
 
     uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | static_cast<uint32_t>(p[3]) << 24; }
 
-    // ISO 9660: the executable sits in the root directory of a plain 2048-byte-sector image.
-    Bytes readElfFromIso(const fs::path &iso)
+    // A disc image: a plain .iso (2048-byte sectors), a raw .bin (2352-byte sectors: MODE1 with the data at +16 of
+    // each sector, MODE2 form 1 at +24), or a .cue sheet naming its .bin. Only the data track is read.
+    struct DiscImage
     {
-        std::ifstream in(iso, std::ios::binary);
-        if (!in)
-            throw std::runtime_error("cannot open " + iso.string());
+        std::ifstream in;
+        uint64_t sectorSize = kSector, dataOffset = 0;
 
-        const auto readAt = [&](uint64_t offset, size_t size) {
-            Bytes data(size);
-            in.seekg(static_cast<std::streamoff>(offset));
-            in.read(reinterpret_cast<char *>(data.data()), static_cast<std::streamsize>(size));
+        static std::string upper(std::string t)
+        {
+            std::transform(t.begin(), t.end(), t.begin(), [](unsigned char c) { return std::toupper(c); });
+            return t;
+        }
+
+        explicit DiscImage(const fs::path &path)
+        {
+            fs::path file = path;
+            std::string mode;
+            if (upper(path.extension().string()) == ".CUE")
+            {
+                // FILE "name.bin" BINARY / TRACK 01 MODE2/2352: the first FILE holds the data track.
+                std::ifstream cue(path);
+                if (!cue)
+                    throw std::runtime_error("cannot open " + path.string());
+                std::string line, bin;
+                while (std::getline(cue, line))
+                {
+                    const std::string u = upper(line);
+                    const size_t f = u.find("FILE");
+                    if (bin.empty() && f != std::string::npos)
+                    {
+                        const size_t q1 = line.find('"'), q2 = line.rfind('"');
+                        if (q1 != std::string::npos && q2 > q1)
+                            bin = line.substr(q1 + 1, q2 - q1 - 1);
+                        else
+                        {
+                            std::istringstream w(line.substr(f + 4));
+                            w >> bin;
+                        }
+                    }
+                    if (mode.empty() && u.find("TRACK") != std::string::npos)
+                    {
+                        if (u.find("MODE1/2352") != std::string::npos) mode = "MODE1/2352";
+                        else if (u.find("MODE2/2352") != std::string::npos) mode = "MODE2/2352";
+                        else if (u.find("MODE1/2048") != std::string::npos) mode = "MODE1/2048";
+                    }
+                }
+                if (bin.empty())
+                    throw std::runtime_error("the .cue sheet names no .bin file");
+                file = path.parent_path() / fs::u8path(bin);
+                if (!fs::exists(file))
+                    throw std::runtime_error("the .cue sheet's file is missing: " + file.string());
+            }
+            in.open(file, std::ios::binary);
             if (!in)
-                throw std::runtime_error("the disc image ended early");
-            return data;
-        };
+                throw std::runtime_error("cannot open " + file.string());
+            if (mode == "MODE1/2352") { sectorSize = 2352; dataOffset = 16; }
+            else if (mode == "MODE2/2352") { sectorSize = 2352; dataOffset = 24; }
+            else if (mode.empty())
+            {
+                // No cue: a raw image starts with the sector sync pattern (00, ten FF, 00); byte 15 is the mode.
+                uint8_t head[16] = {};
+                in.read(reinterpret_cast<char *>(head), sizeof head);
+                in.clear();
+                static const uint8_t sync[12] = {0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0};
+                if (std::equal(sync, sync + 12, head))
+                {
+                    sectorSize = 2352;
+                    dataOffset = head[15] == 1 ? 16 : 24;
+                }
+            }
+        }
 
-        const Bytes descriptor = readAt(16 * kSector, kSector);
+        // size bytes of user data starting at a sector.
+        Bytes read(uint64_t sector, size_t size)
+        {
+            Bytes data(size);
+            for (size_t done = 0; done < size; ++sector)
+            {
+                const size_t n = std::min<size_t>(kSector, size - done);
+                in.seekg(static_cast<std::streamoff>(sector * sectorSize + dataOffset));
+                in.read(reinterpret_cast<char *>(data.data() + done), static_cast<std::streamsize>(n));
+                if (!in)
+                    throw std::runtime_error("the disc image ended early");
+                done += n;
+            }
+            return data;
+        }
+    };
+
+    // ISO 9660: the executable sits in the root directory.
+    Bytes readElfFromImage(const fs::path &image, const Release *&found)
+    {
+        DiscImage disc(image);
+        const Bytes descriptor = disc.read(16, kSector);
         if (descriptor[0] != 1 || std::string(descriptor.begin() + 1, descriptor.begin() + 6) != "CD001")
-            throw std::runtime_error("this is not a plain ISO image with 2048-byte sectors");
+            throw std::runtime_error("this is not a disc image this build can read (.iso, .bin or .cue)");
 
         const uint8_t *root = &descriptor[156];
-        const Bytes directory = readAt(le32(root + 2) * kSector, le32(root + 10));
-        const std::string wanted = std::string(kElfName) + ";1";
+        const Bytes directory = disc.read(le32(root + 2), le32(root + 10));
 
         for (size_t at = 0; at < directory.size();)
         {
@@ -105,29 +197,50 @@ namespace
             const uint8_t nameLength = directory[at + 32];
             std::string name(reinterpret_cast<const char *>(&directory[at + 33]), nameLength);
             std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::toupper(c); });
-            if (name == wanted)
-                return readAt(le32(&directory[at + 2]) * kSector, le32(&directory[at + 10]));
+            for (const Release &r : kReleases)
+                if (name == std::string(r.elfName) + ";1")
+                {
+                    found = &r;
+                    return disc.read(le32(&directory[at + 2]), le32(&directory[at + 10]));
+                }
             at += length;
         }
-        throw std::runtime_error(std::string("this is not the PAL Maximo disc: ") + kElfName + " is missing");
+        throw std::runtime_error("this is not a Maximo disc: none of SLES_507.03, SLUS_200.17 or SLPM_621.27 is on it");
     }
 
-    Bytes readElf(const fs::path &disc)
+    Bytes readElf(const fs::path &disc, const Release *&release)
     {
-        Bytes elf = fs::is_directory(disc) ? readFile(disc / kElfName) : readElfFromIso(disc);
-        if (sha256(elf.data(), elf.size()) != kElfSha256)
-            throw std::runtime_error("this disc's game executable does not match the PAL release (SLES-50703, v1.00)");
+        release = nullptr;
+        Bytes elf;
+        if (fs::is_directory(disc))
+        {
+            for (const Release &r : kReleases)
+                if (fs::exists(disc / r.elfName))
+                {
+                    release = &r;
+                    elf = readFile(disc / r.elfName);
+                    break;
+                }
+            if (!release)
+                throw std::runtime_error("this is not a Maximo disc folder: none of SLES_507.03, SLUS_200.17 or "
+                                         "SLPM_621.27 is in it");
+        }
+        else
+            elf = readElfFromImage(disc, release);
+        if (sha256(elf.data(), elf.size()) != release->sha256)
+            throw std::runtime_error(std::string("this disc's game executable does not match the ") + release->title +
+                                     " release (v1.00) this build knows");
         return elf;
     }
 
     std::string forwardSlashes(const fs::path &path) { return path.generic_string(); }
 
-    void writeRecompilerSettings(const fs::path &repo, const fs::path &generated)
+    void writeRecompilerSettings(const fs::path &repo, const fs::path &generated, const Release &release)
     {
         std::ofstream out(generated / "recomp.toml", std::ios::binary);
         out << "[general]\n"
-            << "input = \"" << forwardSlashes(generated / kElfName) << "\"\n"
-            << "ghidra_output = \"" << forwardSlashes(repo / "data" / "funcs.csv") << "\"\n"
+            << "input = \"" << forwardSlashes(generated / release.elfName) << "\"\n"
+            << "ghidra_output = \"" << forwardSlashes(repo / "data" / release.funcs) << "\"\n"
             << "output = \"" << forwardSlashes(generated / "game") << "\"\n"
             << "single_file_output = false\npatch_syscalls = false\npatch_cop0 = true\npatch_cache = true\n"
             << "stubs = []\nskip = []\n";
@@ -136,15 +249,16 @@ namespace
     }
 
     // recipe.txt: "image <name> <sha256>", then "copy <image offset> <executable offset> <bytes>" in hex.
-    std::vector<std::string> buildVu1Images(const Bytes &elf, const fs::path &repo, const fs::path &generated)
+    std::vector<std::string> buildVu1Images(const Bytes &elf, const fs::path &repo, const fs::path &generated,
+                                            const Release &release)
     {
         const fs::path data = repo / "data" / "vu1";
         const fs::path out = generated / "vu1";
         fs::create_directories(out);
 
-        std::ifstream recipe(data / "recipe.txt");
+        std::ifstream recipe(data / release.recipe);
         if (!recipe)
-            throw std::runtime_error("data/vu1/recipe.txt is missing");
+            throw std::runtime_error(std::string("data/vu1/") + release.recipe + " is missing");
 
         std::vector<std::string> names;
         Bytes image;
@@ -211,16 +325,19 @@ namespace
             list << name << "\n";
     }
 
-    void prepare(const fs::path &disc, const fs::path &repoArg, const fs::path &generatedArg)
+    const Release &prepare(const fs::path &disc, const fs::path &repoArg, const fs::path &generatedArg)
     {
         const fs::path repo = fs::absolute(repoArg);
         const fs::path generated = fs::absolute(generatedArg);
         fs::create_directories(generated);
 
-        const Bytes elf = readElf(disc);
-        writeFile(generated / kElfName, elf.data(), elf.size());
-        writeRecompilerSettings(repo, generated);
-        writeRegistry(buildVu1Images(elf, repo, generated), generated);
+        const Release *release = nullptr;
+        const Bytes elf = readElf(disc, release);
+        writeFile(generated / release->elfName, elf.data(), elf.size());
+        writeFile(generated / "region.txt", release->region, std::strlen(release->region));
+        writeRecompilerSettings(repo, generated, *release);
+        writeRegistry(buildVu1Images(elf, repo, generated, *release), generated);
+        return *release;
     }
 }
 
@@ -230,8 +347,15 @@ int main(int argc, char **argv)
     {
         if (argc == 5 && std::string(argv[1]) == "prepare")
         {
-            prepare(argv[2], argv[3], argv[4]);
-            std::puts("Disc checked: PAL Maximo. Build inputs written.");
+            const Release &release = prepare(argv[2], argv[3], argv[4]);
+            std::printf("Disc checked: Maximo, %s. Build inputs written.\n", release.title);
+            return 0;
+        }
+        if (argc == 3 && std::string(argv[1]) == "region")
+        {
+            const Release *release = nullptr;
+            readElf(argv[2], release);
+            std::puts(release->region);
             return 0;
         }
         if (argc == 3 && std::string(argv[1]) == "sha256")
@@ -241,6 +365,7 @@ int main(int argc, char **argv)
             return 0;
         }
         std::fputs("usage: maximo_kit prepare <disc.iso or folder> <repository> <generated folder>\n"
+                   "       maximo_kit region <disc.iso or folder>\n"
                    "       maximo_kit sha256 <file>\n", stderr);
         return 2;
     }

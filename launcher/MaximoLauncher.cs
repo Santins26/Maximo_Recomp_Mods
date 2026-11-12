@@ -8,7 +8,7 @@
 // Built with the C# 5 compiler that ships with Windows (.NET Framework 4.8): see build.cmd.
 // Experimental build: the Picture setting adds the enhance branch's upscaling (MAXIMO_SSAA, PS2X_PRESENT_FILTER).
 // HD textures (experimental, HdTextures.cs): packs in .\textures, MAXIMO_HDTEX_PACKS for the game.
-// Hidden switches for automated testing: --setup <iso or folder>, --play <seconds>, --zip <notes>, --screenshot <png> [page],
+// Switches: --setup <iso, bin, cue or folder> (always: BUILD_GAME.cmd uses it); for testing --play <seconds>, --zip <notes>, --screenshot <png> [page],
 // --hdtex-install <zip or folder>, --hdtex-marcus, --hdtex-screenshot <png>. Results go to launcher.log.
 using System;
 using System.Collections.Generic;
@@ -17,18 +17,56 @@ using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
+[assembly: AssemblyTitle("Maximo Launcher")]
+[assembly: AssemblyDescription("Launcher and builder for the unofficial Maximo PC port")]
+[assembly: AssemblyCompany("Biorhythmic Studios")]
+[assembly: AssemblyProduct("Maximo Launcher")]
+[assembly: AssemblyCopyright("Copyright (C) 2026 Biorhythmic Studios. GPL-3.0.")]
+[assembly: AssemblyVersion("1.0.3.0")]
+[assembly: AssemblyFileVersion("1.0.3.0")]
+
 static class Build
 {
     public const string Name = "Maximo: Ghosts to Glory - PC port";
     public const string Version = "Maximo-GTG source build";
-    public const string ElfName = "SLES_507.03";
-    public const string ElfSha256 = "03615557E6291B882A54165E068F653C8613856852E4250F7DE4B075ABFC3C99";
-    public const int DiscFileCount = 294;
+    // The release this launcher works with: the one the game in .\game was built from (game\region.txt, written by
+    // build.cmd), or before the game is built, the one of the disc set up in .\disc (disc_region.txt, written when the
+    // disc is set up). None: PAL. Read each time, so setting up a USA or Japanese disc and building it needs no restart.
+    public static readonly string[] Regions = { "PAL", "USA", "JPN" };
+    static readonly string[] ElfNames = { "SLES_507.03", "SLUS_200.17", "SLPM_621.27" };
+    static readonly string[] ElfHashes = { "03615557E6291B882A54165E068F653C8613856852E4250F7DE4B075ABFC3C99",
+                                           "12049EC55891ADFF413B85BCAAAC106567419146AE76CEEE88BC45E13E1B195F",
+                                           "9F58B67B5029A93B30506B670D6C54D7C326A05A3A03780E796EA03C94A17F57" };
+    static readonly string[] Titles = { "PAL (SLES-50703)", "USA (SLUS-20017)", "Japan (SLPM-62127)" };
+    public static string BuiltRegion { get { return ReadRegion(Path.Combine(Paths.Root, "game", "region.txt")); } }
+    public static string Region
+    {
+        get { return BuiltRegion ?? ReadRegion(Path.Combine(Paths.Root, "disc_region.txt")) ?? "PAL"; }
+    }
+    static int Index { get { return Math.Max(0, Array.IndexOf(Regions, Region)); } }
+    public static string ElfName { get { return ElfNames[Index]; } }
+    public static string ElfSha256 { get { return ElfHashes[Index]; } }
+    public static string DiscTitle { get { return Titles[Index]; } }
+    public static int DiscFileCount { get { return Region == "PAL" ? 294 : 0; } } // 0: not checked (only the PAL count is known)
+    public static string ElfNameOf(string region) { return ElfNames[Math.Max(0, Array.IndexOf(Regions, region))]; }
+    public static string ElfSha256Of(string region) { return ElfHashes[Math.Max(0, Array.IndexOf(Regions, region))]; }
+    public static string TitleOf(string region) { return Titles[Math.Max(0, Array.IndexOf(Regions, region))]; }
+
+    static string ReadRegion(string file)
+    {
+        try
+        {
+            string r = File.Exists(file) ? File.ReadAllText(file).Trim().ToUpperInvariant() : "";
+            return Array.IndexOf(Regions, r) >= 0 ? r : null;
+        }
+        catch (Exception) { return null; }
+    }
     public const int KeepSessions = 10;
 }
 
@@ -41,6 +79,7 @@ static class Paths
     public static readonly string Logs = Path.Combine(Root, "logs");
     public static readonly string Screenshots = Path.Combine(Root, "screenshots");
     public static readonly string LauncherLog = Path.Combine(Root, "launcher.log");
+    public static readonly string Art = Path.Combine(Root, "art");
 }
 
 // The picture settings of this experimental build, saved in settings.ini next to the launcher.
@@ -71,6 +110,8 @@ static class Picture
     public static bool Vu1Pipeline = true;
     // Borderless fullscreen on the current monitor (PS2X_WINDOW_MODE=borderless); Alt+Enter switches in the game. Off by default.
     public static bool Borderless = false;
+    // Skip the Capcom logos, copyright and title screen (MAXIMO_SKIP_INTRO=1): boots into the main menu. Off by default.
+    public static bool SkipIntro = false;
     // Smooth effects (MAXIMO_SOFT_PARTICLES=1, with supersampling only): fire, smoke and sparkle particles are drawn at
     // the full upscaled resolution instead of in blocks of one PS2 pixel. On by default.
     public static bool SoftParticles = true;
@@ -80,11 +121,45 @@ static class Picture
     public static readonly string[] AspectNames = { "4:3 (original)", "16:9 widescreen (experimental)" };
     static readonly string[] AspectValues = { "4:3", "16:9" };
     public static int Aspect = 0;
-    // Experimental 60 Hz gameplay (MAXIMO_FRAME_RATE=60): the same game speed with more frames; the front end, attract
-    // demo and movies stay at 50 Hz. 50 Hz by default.
-    public static readonly string[] FrameRateNames = { "50 Hz (original)", "60 Hz in gameplay (experimental)" };
-    static readonly string[] FrameRateValues = { "50", "60" };
+    // Gameplay frame rate (MAXIMO_FRAME_RATE): the same game speed with more frames; the front end, attract demo and
+    // movies stay at the release's own rate. PAL: 50 or 60 Hz; the USA and Japanese releases run at 60 Hz already.
+    // (Higher rates - MAXIMO_FRAME_RATE=120 or refresh - are left to the environment variable for now.)
+    public static readonly string[] FrameRateNames = Build.Region == "PAL"
+        ? new[] { "50 Hz (original)", "60 Hz in gameplay (experimental)" }
+        : new[] { "60 Hz (original)" };
+    static readonly string[] FrameRateValues = Build.Region == "PAL" ? new[] { "50", "60" } : new[] { "60" };
     public static int FrameRate = 0;
+    // Experimental object budget (MAXIMO_OBJECT_BUDGET=more): the game stops running a level's enemies and objects once
+    // a busy level passes its per-type limit; this raises the limit so more of them stay alive. Original by default.
+    public static readonly string[] ObjectBudgetNames = { "Original", "More enemies and objects (experimental)",
+                                                          "Maximum enemies and objects (experimental)" };
+    static readonly string[] ObjectBudgetValues = { "vanilla", "more", "1000" };
+    public static int ObjectBudget = 0;
+    // Experimental extra enemies (MoreEnemies.cs): when Play is pressed, copies of some of each level's own enemies are
+    // written into the level files in .\disc (the originals are kept and come back with Original). The object limit
+    // is raised with it so they all run. Original by default. Saved as enemies=.
+    public static int Enemies = 0;
+    // Experimental game memory (MAXIMO_RAM=more): the game's memory pools grow from about 28 MB to about 123 MB, for
+    // levels with many more enemies (each extra enemy costs about 100 KB). Always on with extra enemies. Original by
+    // default. Saved as memory= ("64" from earlier builds reads as Expanded).
+    public static readonly string[] MemoryNames = { "Original (32 MB, like the PS2)", "Expanded (128 MB, experimental)" };
+    static readonly string[] MemoryValues = { "32", "more" };
+    public static int Memory = 0;
+    // Cross-world enemies for the debug menu's spawn tool (CrossWorld.cs): when Play is pressed, enemies from the other
+    // worlds are ported into each world's files in .\disc (the originals are kept and come back when this is turned
+    // off). Needs Python 3 and the maximo1randomizer folder; turns Expanded memory on. Always on (no longer a setting).
+    public static bool CrossWorld = true;
+    // Experimental free camera (MAXIMO_CAMERA=orbit): the right stick turns the camera around Maximo, R3 swings it back
+    // behind him. Speed in degrees per second at full stick (MAXIMO_CAMERA_SPEED), seconds without camera input before
+    // it swings back by itself (MAXIMO_CAMERA_RETURN, 0 = never), up/down inverted (MAXIMO_CAMERA_INVERT_Y). Off by default.
+    public static bool FreeCamera = false;
+    public static readonly string[] CameraSpeedNames = { "Slow", "Normal", "Fast", "Very fast" };
+    static readonly int[] CameraSpeedValues = { 90, 150, 220, 300 };
+    public static int CameraSpeed = 1;
+    public static readonly string[] CameraReturnNames = { "Never", "After 2 seconds", "After 3 seconds", "After 5 seconds", "After 8 seconds" };
+    static readonly int[] CameraReturnValues = { 0, 2, 3, 5, 8 };
+    public static int CameraReturn = 2;
+    public static bool CameraInvertY = false;
     static string File_ { get { return Path.Combine(Paths.Root, "settings.ini"); } }
 
     public static void Load()
@@ -103,10 +178,19 @@ static class Picture
                 if (kv[0].Trim() == "vu1thread") Vu1Thread = kv[1].Trim() == "1";
                 if (kv[0].Trim() == "vu1pipeline") Vu1Pipeline = kv[1].Trim() != "0";
                 if (kv[0].Trim() == "borderless") Borderless = kv[1].Trim() == "1";
+                if (kv[0].Trim() == "skipintro") SkipIntro = kv[1].Trim() == "1";
                 if (kv[0].Trim() == "softfx") SoftParticles = kv[1].Trim() != "0";
                 if (kv[0].Trim() == "vsync") VSync = kv[1].Trim() != "0";
                 if (kv[0].Trim() == "aspect") Aspect = Math.Max(0, Array.IndexOf(AspectValues, kv[1].Trim()));
                 if (kv[0].Trim() == "framerate") FrameRate = Math.Max(0, Array.IndexOf(FrameRateValues, kv[1].Trim()));
+                // (The object limit, extra enemies and memory are no longer settings: Original, Original and Expanded with
+                // the cross-world enemies, which are always on. Older settings files' values are ignored.)
+                if (kv[0].Trim() == "camera") FreeCamera = kv[1].Trim() == "1";
+                if (kv[0].Trim() == "cameraspeed" && int.TryParse(kv[1].Trim(), out n) && Array.IndexOf(CameraSpeedValues, n) >= 0)
+                    CameraSpeed = Array.IndexOf(CameraSpeedValues, n);
+                if (kv[0].Trim() == "camerareturn" && int.TryParse(kv[1].Trim(), out n) && Array.IndexOf(CameraReturnValues, n) >= 0)
+                    CameraReturn = Array.IndexOf(CameraReturnValues, n);
+                if (kv[0].Trim() == "camerainvert") CameraInvertY = kv[1].Trim() == "1";
                 HdTextures.Load(kv[0].Trim(), kv[1].Trim());
             }
         }
@@ -119,10 +203,19 @@ static class Picture
                                         "\r\nvu1thread=" + (Vu1Thread ? 1 : 0) +
                                         "\r\nvu1pipeline=" + (Vu1Pipeline ? 1 : 0) +
                                         "\r\nborderless=" + (Borderless ? 1 : 0) +
+                                        "\r\nskipintro=" + (SkipIntro ? 1 : 0) +
                                         "\r\nsoftfx=" + (SoftParticles ? 1 : 0) +
                                         "\r\nvsync=" + (VSync ? 1 : 0) +
                                         "\r\naspect=" + AspectValues[Aspect] +
-                                        "\r\nframerate=" + FrameRateValues[FrameRate] + "\r\n" + HdTextures.SaveLines()); }
+                                        "\r\nframerate=" + FrameRateValues[FrameRate] +
+                                        "\r\nobjectbudget=" + ObjectBudgetValues[ObjectBudget] +
+                                        "\r\nenemies=" + MoreEnemies.Keys[Enemies] +
+                                        "\r\nmemory=" + MemoryValues[Memory] +
+                                        "\r\ncrossworld=" + (CrossWorld ? 1 : 0) +
+                                        "\r\ncamera=" + (FreeCamera ? 1 : 0) +
+                                        "\r\ncameraspeed=" + CameraSpeedValues[CameraSpeed] +
+                                        "\r\ncamerareturn=" + CameraReturnValues[CameraReturn] +
+                                        "\r\ncamerainvert=" + (CameraInvertY ? 1 : 0) + "\r\n" + HdTextures.SaveLines()); }
         catch (IOException) { }
     }
 
@@ -131,7 +224,13 @@ static class Picture
         return (Ssaa[Mode] == null ? "original resolution" : (Mode >= 4 ? "4x resolution, " : "2x resolution, ") + Ssaa[Mode] + "x SSAA" + (Mode == 5 ? ", SMAA" : "")) +
                (Fsr ? ", FSR scaling" : Smooth ? ", smooth scaling" : ", sharp scaling") + (Vu1Thread ? ", 3D on a second CPU core" + (Vu1Pipeline ? " with overlapped frames" : "") : "") +
                (Borderless ? ", borderless fullscreen" : "") + (SoftParticles && Ssaa[Mode] != null ? ", smooth effects" : "") + (VSync ? ", VSync" : "") + (Aspect == 1 ? ", 16:9 widescreen" : "") +
-               (FrameRate == 1 ? ", 60 Hz gameplay" : "") + HdTextures.Describe();
+               (FrameRate > 0 ? (FrameRateValues[FrameRate] == "refresh" ? ", monitor-rate gameplay" : ", " + FrameRateValues[FrameRate] + " Hz gameplay") : "") + (ObjectBudget == 1 ? ", more enemies and objects" : ObjectBudget == 2 ? ", maximum enemies and objects" : "") +
+               (Enemies > 0 ? ", +" + MoreEnemies.Keys[Enemies] + "% enemies" : "") +
+                (CrossWorld ? ", cross-world enemies" : "") +
+                (Memory == 1 || Enemies > 0 || CrossWorld ? ", 128 MB memory" : "") +
+               (FreeCamera ? ", free camera (" + CameraSpeedNames[CameraSpeed].ToLowerInvariant() + ", back " +
+                             (CameraReturnValues[CameraReturn] == 0 ? "never" : "after " + CameraReturnValues[CameraReturn] + " s") +
+                             (CameraInvertY ? ", inverted" : "") + ")" : "") + HdTextures.Describe();
     }
 
     // The settings of the developer's play_enhanced.cmd; a value already in the environment wins.
@@ -151,6 +250,8 @@ static class Picture
             info.EnvironmentVariables["PS2X_VU1_THREAD"] = "1";
         if (Vu1Thread && Vu1Pipeline && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2X_VU1_PIPELINE")))
             info.EnvironmentVariables["PS2X_VU1_PIPELINE"] = "1";
+        if (SkipIntro && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_SKIP_INTRO")))
+            info.EnvironmentVariables["MAXIMO_SKIP_INTRO"] = "1";
         if (Borderless && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2X_WINDOW_MODE")))
             info.EnvironmentVariables["PS2X_WINDOW_MODE"] = "borderless";
         info.EnvironmentVariables["PS2X_SHOT_DIR"] = Paths.Screenshots;
@@ -160,8 +261,30 @@ static class Picture
             info.EnvironmentVariables["MAXIMO_SOFT_PARTICLES"] = "1";
         if (Aspect == 1 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_ASPECT")))
             info.EnvironmentVariables["MAXIMO_ASPECT"] = "16:9";
-        if (FrameRate == 1 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_FRAME_RATE")))
-            info.EnvironmentVariables["MAXIMO_FRAME_RATE"] = "60";
+        if (FrameRate > 0 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_FRAME_RATE")))
+            info.EnvironmentVariables["MAXIMO_FRAME_RATE"] = FrameRateValues[FrameRate];
+        if (FreeCamera && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_CAMERA")))
+        {
+            info.EnvironmentVariables["MAXIMO_CAMERA"] = "orbit";
+            info.EnvironmentVariables["MAXIMO_CAMERA_SPEED"] = CameraSpeedValues[CameraSpeed].ToString();
+            info.EnvironmentVariables["MAXIMO_CAMERA_RETURN"] = CameraReturnValues[CameraReturn].ToString();
+            info.EnvironmentVariables["MAXIMO_CAMERA_INVERT_Y"] = CameraInvertY ? "1" : "0";
+        }
+        // Extra enemies only show up if the object limit lets them run, so it is raised with them.
+        // The budget is per type and the original is 100, so it follows the enemy multiplier with room to spare
+        // (triple enemies -> 400). Maximum is the recomp's ceiling, 1000.
+        if ((ObjectBudget > 0 || Enemies > 0) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_OBJECT_BUDGET")))
+        {
+            int budget = ObjectBudget == 2 ? 1000 : 200;
+            budget = Math.Max(budget, Math.Min(1000, (int)Math.Ceiling(100.0 * (MoreEnemies.Multipliers[Enemies] + 1.0))));
+            info.EnvironmentVariables["MAXIMO_OBJECT_BUDGET"] = budget.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        // Extra enemies need memory for their models and AI; the PS2's 32 MB runs out first (10x crashed the intro).
+        // Cross-world enemies with every sound: the sound banks need more than the PS2's 2 MB of SPU2 sound RAM.
+        if (CrossWorld && global::CrossWorld.SoundRamMb > 2 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2X_SPU2_RAM_MB")))
+            info.EnvironmentVariables["PS2X_SPU2_RAM_MB"] = global::CrossWorld.SoundRamMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if ((Memory == 1 || Enemies > 0 || CrossWorld) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_RAM")))
+            info.EnvironmentVariables["MAXIMO_RAM"] = "more";
         string packs = HdTextures.PackList();
         if (packs.Length > 0 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_HDTEX_PACKS")))
             info.EnvironmentVariables["MAXIMO_HDTEX_PACKS"] = packs;
@@ -195,12 +318,12 @@ static class Setup
         string elf = Path.Combine(Paths.Disc, Build.ElfName);
         if (!File.Exists(elf)) { why = "Game files not set up yet."; return false; }
         int count = Directory.GetFiles(Paths.Disc, "*", SearchOption.AllDirectories).Length;
-        if (count != Build.DiscFileCount)
+        if (Build.DiscFileCount != 0 && count != Build.DiscFileCount)
         {
             why = "The game folder is incomplete (" + count + " of " + Build.DiscFileCount + " files). Set it up again.";
             return false;
         }
-        why = "Game files ready (PAL SLES-50703).";
+        why = "Game files ready (" + Build.DiscTitle + ").";
         return true;
     }
 
@@ -225,12 +348,36 @@ static class Setup
 
     static string Quote(string path) { return "'" + path.Replace("'", "''") + "'"; }
 
-    // Copies a verified disc (an ISO, which Windows mounts read-only, or an extracted folder) into .\disc.
+    // Copies a verified disc (an ISO, which Windows mounts read-only; a .bin/.cue, which is read here; or an
+    // extracted folder) into .\disc.
     public static void Install(string source, Action<string> progress)
     {
-        bool isIso = File.Exists(source) && source.EndsWith(".iso", StringComparison.OrdinalIgnoreCase);
+        // Any disc image (.iso, .bin, .cue) is read here, into a folder next to .\disc: Windows cannot mount a .bin/.cue,
+        // and gave some ISOs no drive letter. Only an ISO this reader cannot open (a DVD with no ISO 9660 file system)
+        // is still mounted by Windows.
+        bool isIso = false;
         bool mountedHere = false;
-        string root = source;
+        string root = source, extracted = null;
+        if (File.Exists(source) && DiscImage.IsImage(source))
+        {
+            progress("Opening the disc image...");
+            extracted = Paths.Disc + ".image";
+            try
+            {
+                if (Directory.Exists(extracted)) Directory.Delete(extracted, true);
+                int n = DiscImage.Extract(source, extracted, progress);
+                Log.Write("disc image " + source + ": " + n + " files read out");
+                root = extracted;
+            }
+            catch (Exception e)
+            {
+                Log.Write("disc image " + source + " could not be read here (" + e.Message + ")");
+                try { if (Directory.Exists(extracted)) Directory.Delete(extracted, true); } catch (Exception) { }
+                extracted = null;
+                isIso = source.EndsWith(".iso", StringComparison.OrdinalIgnoreCase);
+                if (!isIso) throw;
+            }
+        }
         if (isIso)
         {
             progress("Opening the disc image...");
@@ -247,20 +394,27 @@ static class Setup
             if (root == source)
                 throw new Exception("Windows mounted the image but gave it no drive letter.");
         }
-        else if (!Directory.Exists(source))
-            throw new Exception("Choose a .iso file or a folder with the extracted disc.");
+        else if (extracted == null && !Directory.Exists(source))
+            throw new Exception("Choose a disc image (.iso, .bin or .cue) or a folder with the extracted disc.");
 
         try
         {
-            string elf = Path.Combine(root, Build.ElfName);
-            if (!File.Exists(elf))
-                throw new Exception("This is not the PAL Maximo disc: " + Build.ElfName + " is missing. " +
-                                    "This build needs Maximo: Ghosts to Glory, Europe (SLES-50703).");
+            // Which release this disc is: once the game is built, it has to be that one; before, any of the three
+            // (the Build button then builds for it).
+            string built = Build.BuiltRegion, region = null;
+            foreach (string r in Build.Regions)
+                if (File.Exists(Path.Combine(root, Build.ElfNameOf(r))) && (built == null || built == r)) { region = r; break; }
+            if (region == null)
+                throw new Exception(built != null
+                    ? "This is not the " + Build.TitleOf(built) + " Maximo disc: " + Build.ElfNameOf(built) + " is missing. " +
+                      "The game here was built for Maximo: Ghosts to Glory, " + Build.TitleOf(built) + "."
+                    : "This is not a Maximo: Ghosts to Glory disc (PAL SLES-50703, USA SLUS-20017 or Japan SLPM-62127).");
+            string elf = Path.Combine(root, Build.ElfNameOf(region));
             progress("Checking the disc...");
             string hash = Sha256(elf);
-            Log.Write("disc source " + source + " (" + root + "), " + Build.ElfName + " sha256 " + hash);
-            if (!string.Equals(hash, Build.ElfSha256, StringComparison.OrdinalIgnoreCase))
-                throw new Exception("This disc's game executable does not match the PAL release (SLES-50703, v1.00). " +
+            Log.Write("disc source " + source + " (" + root + "), " + Build.ElfNameOf(region) + " sha256 " + hash);
+            if (!string.Equals(hash, Build.ElfSha256Of(region), StringComparison.OrdinalIgnoreCase))
+                throw new Exception("This disc's game executable does not match the " + Build.TitleOf(region) + " release (v1.00). " +
                                     "Other versions are not supported by this build.");
 
             string[] files = Directory.GetFiles(root, "*", SearchOption.AllDirectories);
@@ -269,7 +423,7 @@ static class Setup
             long total = files.Sum(f => new FileInfo(f).Length), done = 0;
             for (int i = 0; i < files.Length; ++i)
             {
-                string relative = files[i].Substring(root.Length).TrimStart('\\');
+                string relative = files[i].Substring(root.Length).TrimStart('\\', '/');
                 string target = Path.Combine(temp, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target));
                 File.Copy(files[i], target, true);
@@ -279,6 +433,10 @@ static class Setup
             }
             if (Directory.Exists(Paths.Disc)) Directory.Delete(Paths.Disc, true);
             Directory.Move(temp, Paths.Disc);
+            MoreEnemies.ForgetBackup(); // the new files are the originals now
+            CrossWorld.ForgetBackup();
+            File.WriteAllText(Path.Combine(Paths.Root, "disc_region.txt"), region); // (Build.Region before a build)
+            Log.Write("disc release: " + Build.TitleOf(region));
             string why;
             if (!DiscReady(out why))
                 throw new Exception(why);
@@ -286,6 +444,11 @@ static class Setup
         }
         finally
         {
+            if (extracted != null)
+            {
+                try { Directory.Delete(extracted, true); }
+                catch (Exception e) { Log.Write("could not remove " + extracted + ": " + e.Message); }
+            }
             if (mountedHere)
             {
                 try { PowerShell("Dismount-DiskImage -ImagePath " + Quote(source) + " | Out-Null"); }
@@ -321,6 +484,26 @@ static class Game
         string session = Path.Combine(Paths.Logs, "session-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
         Directory.CreateDirectory(session);
         Directory.CreateDirectory(Paths.MemoryCard);
+        // Extra enemies: write the changed level files into .\disc (or put the originals back) before the game reads them.
+        try
+        {
+            string enemyNote = MoreEnemies.Prepare(MoreEnemies.Multipliers[Picture.Enemies]);
+            if (enemyNote.Length > 0) Log.Write(enemyNote);
+        }
+        catch (Exception e)
+        {
+            Log.Write("enemies: could not prepare the level files: " + e.Message);
+        }
+        // Cross-world enemies: port them into the world files in .\disc (or put the originals back).
+        try
+        {
+            string crossNote = CrossWorld.Prepare(Picture.CrossWorld);
+            if (crossNote.Length > 0) Log.Write(crossNote);
+        }
+        catch (Exception e)
+        {
+            Log.Write("cross-world: could not prepare the world files: " + e.Message);
+        }
 
         var info = new ProcessStartInfo(Paths.Game,
             "\"" + Paths.Disc + "\" " + seconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " boot_log.txt");
@@ -340,8 +523,9 @@ static class Game
         if (recordAudio)
             info.EnvironmentVariables["MAXIMO_AUDIO_WAV"] = "audio.wav";
         Picture.Apply(info);
+        Bindings.Apply(info);
 
-        Log.Write("play: session " + Path.GetFileName(session) + ", picture: " + Picture.Describe() +
+        Log.Write("play: session " + Path.GetFileName(session) + ", picture: " + Picture.Describe() + Bindings.Describe() +
                   (recordAudio ? ", recording audio" : ""));
         var started = DateTime.Now;
         int exitCode;
@@ -477,7 +661,9 @@ static class Game
             using (var w = new StreamWriter(archive.CreateEntry("notes.txt").Open(), new UTF8Encoding(false)))
             {
                 w.WriteLine("Build: " + Build.Version);
-                w.WriteLine("Picture: " + Picture.Describe());
+                w.WriteLine("Picture: " + Picture.Describe() + Bindings.Describe());
+                if (File.Exists(Bindings.File_))
+                    w.WriteLine("Controls file:\r\n" + File.ReadAllText(Bindings.File_));
                 w.WriteLine("Session: " + Path.GetFileName(session) + ", zipped " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 w.WriteLine();
                 w.WriteLine(string.IsNullOrWhiteSpace(notes) ? "(no description given)" : notes.Trim());
@@ -494,6 +680,7 @@ static class Program
     static int Main(string[] args)
     {
         Picture.Load();
+        Bindings.Load();
         try
         {
             if (args.Length == 2 && args[0] == "--setup")
@@ -501,6 +688,34 @@ static class Program
                 Setup.Install(args[1], s => { });
                 return 0;
             }
+#if DEV_SWITCHES
+            if (args.Length == 2 && args[0] == "--screenshot-controls")
+            {
+                Application.EnableVisualStyles();
+                using (var form = new ControlsForm())
+                {
+                    form.Show();
+                    Application.DoEvents();
+                    using (var bitmap = new Bitmap(form.Width, form.Height))
+                    {
+                        form.DrawToBitmap(bitmap, new Rectangle(0, 0, form.Width, form.Height));
+                        bitmap.Save(args[1], System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                }
+                return 0;
+            }
+            if (args.Length >= 1 && args[0] == "--build")
+            {
+                Builder.ForceOwnGit = args.Length > 1 && args[1] == "--own-git";
+                Builder.Run((text, percent) => { if (percent <= 0) Console.WriteLine("== " + text); }, Console.WriteLine);
+                return 0;
+            }
+            if (args.Length == 2 && args[0] == "--signed")
+            {
+                Console.WriteLine(Builder.SignedByMicrosoft(args[1]) ? "signed" : "not signed");
+                return 0;
+            }
+#endif
             if (args.Length >= 2 && args[0] == "--screenshot")
             {
                 Application.EnableVisualStyles();
@@ -559,6 +774,10 @@ static class Program
             return 1;
         }
         Log.Write("launcher started, build " + Build.Version);
+        // The mod package's launcher once the game is built from it: the built launcher in .\source\dist is the one
+        // that plays (its game, disc and saves live there).
+        if (BuildGame.Available && !File.Exists(Paths.Game) && BuildGame.Built && BuildGame.OpenBuilt())
+            return 0;
         Application.EnableVisualStyles();
         Application.Run(new LauncherForm());
         return 0;

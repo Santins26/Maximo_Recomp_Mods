@@ -32,7 +32,7 @@ struct Header {
 struct Entry {
     uint64_t tex;    // PCSX2 TEX0Hash (XXH3-64 of the texture data)
     uint64_t clut;   // PCSX2 CLUTHash (XXH3-64 of the palette in index order); 0 when the name has none
-    uint32_t bits;   // PCSX2 TEX0 bits: PSM 0-5, TW 6-9, TH 10-13, TA0 15-22, AEM 23, TA1 24-31
+    uint32_t bits;   // PCSX2 TEX0 bits: PSM 0-5, TW 6-9, TH 10-13, TCC 14, TA0 15-22, AEM 23, TA1 24-31
     uint16_t width;  // level 0 size in texels
     uint16_t height;
     uint8_t format;  // Format. Alpha as in the PCSX2 pack: 0-255, 255 = opaque (the shader maps it to the GS's 0x80)

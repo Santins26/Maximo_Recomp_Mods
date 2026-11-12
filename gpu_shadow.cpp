@@ -12,6 +12,7 @@
 // MAXIMO_SMAA: Granite's SMAA shaders as SPIR-V (shaders/smaa/build_smaa_spv.sh) and SMAA's lookup tables
 // (Granite/tools/smaa; SMAA is MIT, Jorge Jimenez et al.).
 #include "smaa_spv.h"
+#include "maximo_post_spv.h" // POST EFFECTS (shaders/smaa/post)
 #include "AreaTex.h"
 #include "SearchTex.h"
 
@@ -26,11 +27,32 @@
 #include <thread>
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <fstream>
 #include <utility>
 #include <vector>
 
+// POST EFFECTS level (0 off, 1 soft, 2 strong): set by the debug menu (game thread), read by the GS worker.
+namespace
+{
+std::atomic<int> g_gpuPostLevel{[] {
+    const char *v = std::getenv("MAXIMO_POST");
+    return v ? std::clamp(std::atoi(v), 0, 2) : 0;
+}()};
+}
+static std::atomic<int> g_gpuLightLevel{[] {
+    const char *v = std::getenv("MAXIMO_SCENE_LIGHT");
+    return v ? std::clamp(std::atoi(v), 0, 4) : 0;
+}()};
+void GpuShadow::setLightLevel(int level) { g_gpuLightLevel.store(std::clamp(level, 0, 4), std::memory_order_relaxed); }
+int GpuShadow::lightLevel() { return g_gpuLightLevel.load(std::memory_order_relaxed); }
+void GpuShadow::setPostLevel(int level) { g_gpuPostLevel.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
+int GpuShadow::postLevel() { return g_gpuPostLevel.load(std::memory_order_relaxed); }
+
 extern std::atomic<bool> pgs_maximo_draw_log; // paraLLEl-GS diagnostics (gs_interface.cpp)
+// GIF packets the host sent to the GPU only (pure geometry; maximo_boot's gifPacketNeedsCpuGs): the CPU frontend's
+// packet count is short by these, and they count as seen by it for the completeness checks.
+std::atomic<uint64_t> g_gpuHostSkippedGifPackets{0};
 
 namespace
 {
@@ -90,7 +112,7 @@ struct BypassCounts
     static BypassCounts read(const GSStreamStats &s)
     {
         BypassCounts c;
-        c.packets = s.packets.load(std::memory_order_relaxed);
+        c.packets = s.packets.load(std::memory_order_relaxed) + g_gpuHostSkippedGifPackets.load(std::memory_order_relaxed);
         c.directRegWrites = s.directRegWrites.load(std::memory_order_relaxed);
         c.nativePacked = s.nativePackedPackets.load(std::memory_order_relaxed);
         c.nativeUploads = s.nativeImageUploads.load(std::memory_order_relaxed);
@@ -195,6 +217,15 @@ struct GpuShadow::Impl
     Vulkan::Program *smaaEdge = nullptr, *smaaWeight = nullptr, *smaaBlend = nullptr;
     bool smaaFailed = false;
     uint32_t smaaLogged[2] = {};
+    // POST EFFECTS (debug menu / MAXIMO_POST=1|2): bloom and a light grade on the GPU, after SMAA, before FSR.
+    Vulkan::Program *postBright = nullptr, *postBlur = nullptr, *postComposite = nullptr;
+    bool postFailed = false;
+    // SCENE LIGHTING (debug menu / MAXIMO_SCENE_LIGHT=1..4): ambient occlusion from the game's Z buffer in GS memory.
+    Vulkan::Program *lightAo = nullptr, *lightComposite = nullptr;
+    bool lightFailed = false;
+    uint64_t lightLoggedKey = ~0ull;
+    float lightLogFar = 20.0f; // debug depth view: log2(z) shown as black (updated from the depth statistics)
+    Vulkan::BufferHandle lightStatsBuffer;
     Vulkan::Context context;
     Vulkan::Device device;
     // SMAA's lookup tables (after `device`, so they are released before it).
@@ -231,10 +262,24 @@ struct GpuShadow::Impl
         const char *v = std::getenv("MAXIMO_GPU_SYNC_READBACK");
         return v && std::atoi(v) != 0;
     }();
+    // FRAME PACING: finished frames wait in a short queue and the window takes them one per present, oldest first.
+    // The GS worker finishes frames whenever their work is done, not on the window's beat; with a single slot a
+    // present could find two new frames (one never shown) and the next none (one shown twice), which is the judder
+    // of uneven pacing. The queue holds kQueueMax; a backlog that persists is trimmed by one frame so it adds at most
+    // about a frame of latency.
+    struct QueuedFrame
+    {
+        std::vector<uint8_t> pixels;
+        uint32_t width = 0, height = 0;
+        uint64_t guestFrame = 0;
+    };
+    static constexpr size_t kQueueMax = 3;
     std::mutex frameMutex;
-    std::vector<uint8_t> presentPixels;
-    uint32_t presentWidth = 0, presentHeight = 0;
+    std::deque<QueuedFrame> frameQueue;
+    std::vector<std::vector<uint8_t>> spareBuffers; // buffers of shown or dropped frames, refilled by later ones
+    uint32_t backlogTakes = 0;
     uint64_t presentGeneration = 0, takenGeneration = 0;
+    std::atomic<uint64_t> queueDropped{0}, queueTrimmed{0};
     uint64_t submitNs = 0, readbackNs = 0;
     uint32_t timedFrames = 0;
     std::FILE *frameHashes = nullptr;
@@ -302,6 +347,7 @@ struct GpuShadow::Impl
             workReady.notify_all();
             worker.join();
         }
+        savePipelineCache();
         if (stream)
             std::fclose(stream);
         if (frameHashes)
@@ -310,12 +356,16 @@ struct GpuShadow::Impl
 
     void queuePacket(uint32_t path, const uint8_t *data, uint32_t size)
     {
-        const size_t at = batch.size();
+        // Appended, not resized and then overwritten (resize zero-fills every byte first), into a batch that keeps
+        // its capacity between hand-overs.
         const size_t padded = (size_t(size) + 15) & ~size_t(15);
-        batch.resize(at + 16 + padded);
+        if (batch.capacity() < kBatchBytes + 16 + padded)
+            batch.reserve(std::max(batch.size() + 16 + padded, kBatchBytes * 2));
         const uint32_t header[4] = {path, size, 0, 0};
-        std::memcpy(batch.data() + at, header, sizeof(header));
-        std::memcpy(batch.data() + at + 16, data, size);
+        const uint8_t *h = reinterpret_cast<const uint8_t *>(header);
+        batch.insert(batch.end(), h, h + sizeof(header));
+        batch.insert(batch.end(), data, data + size);
+        batch.insert(batch.end(), padded - size, uint8_t{0});
         if (batch.size() >= kBatchBytes)
             handOver(nullptr);
     }
@@ -417,6 +467,7 @@ struct GpuShadow::Impl
         if (attempted)
             return ready;
         attempted = true;
+        const auto tStart = std::chrono::steady_clock::now();
         if (!Vulkan::Context::init_loader(nullptr))
         {
             std::fprintf(stderr, "[gpu-shadow] Vulkan loader initialization failed\n");
@@ -431,7 +482,9 @@ struct GpuShadow::Impl
             std::fprintf(stderr, "[gpu-shadow] Vulkan device initialization failed\n");
             return false;
         }
+        const auto tContext = std::chrono::steady_clock::now();
         device.set_context(context);
+        loadPipelineCache();
         device.init_frame_contexts(4);
         ParallelGS::GSOptions options = {};
         options.super_sampling = ParallelGS::SuperSampling(superSampling);
@@ -442,6 +495,13 @@ struct GpuShadow::Impl
             std::fprintf(stderr, "[gpu-shadow] paraLLEl-GS initialization failed\n");
             return false;
         }
+        // Scene depth for SCENE LIGHTING: the Maximo ubershader records every opaque primitive's Z (the game's own Z
+        // buffer stays nearly empty: it draws its world without Z writes).
+        gs.enable_scene_depth();
+        const auto tGs = std::chrono::steady_clock::now();
+        auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        std::fprintf(stderr, "[gpu] start-up: Vulkan instance and device %.0f ms, paraLLEl-GS (shaders, buffers) %.0f ms\n",
+                     ms(tStart, tContext), ms(tContext, tGs));
         if (superSampling > 1)
             std::fprintf(stderr, "[gpu] enhancement: %ux SSAA, high-resolution scanout %s, super-sampled textures %s\n",
                          superSampling, hiresScanout ? (ultraScanout ? "on (4x)" : "on (2x)") : "off",
@@ -483,6 +543,59 @@ struct GpuShadow::Impl
         std::fprintf(stderr, "[gpu-shadow] paraLLEl-GS initialized with CPU VRAM snapshot (CPU packets so far %llu)\n",
                      static_cast<unsigned long long>(atInit.packets));
         return true;
+    }
+
+    // The Vulkan pipeline cache, kept between runs (MAXIMO_PIPELINE_CACHE: the file, set by maximo_boot next to the
+    // executable): paraLLEl-GS builds its pipelines at start-up and as new kinds of drawing appear (the "stalled
+    // compile" hitches); with the cache the driver can skip compiling them again. Saved after a minute of play and
+    // when the game closes.
+    std::string pipelineCachePath()
+    {
+        const char *v = std::getenv("MAXIMO_PIPELINE_CACHE");
+        return v && *v && std::strcmp(v, "0") != 0 ? std::string(v) : std::string();
+    }
+    void loadPipelineCache()
+    {
+        const std::string path = pipelineCachePath();
+        if (path.empty())
+            return;
+        std::vector<uint8_t> data;
+        if (std::FILE *f = std::fopen(path.c_str(), "rb"))
+        {
+            std::fseek(f, 0, SEEK_END);
+            const long size = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (size > 0 && size < (512l << 20))
+            {
+                data.resize(size_t(size));
+                if (std::fread(data.data(), 1, data.size(), f) != data.size())
+                    data.clear();
+            }
+            std::fclose(f);
+        }
+        const bool ok = device.init_pipeline_cache(data.empty() ? nullptr : data.data(), data.size());
+        std::fprintf(stderr, "[gpu] pipeline cache %s: %zu bytes from %s\n", ok ? "ready" : "FAILED", data.size(), path.c_str());
+    }
+    void savePipelineCache()
+    {
+        const std::string path = pipelineCachePath();
+        if (path.empty() || !ready)
+            return;
+        const size_t size = device.get_pipeline_cache_size();
+        if (size == 0)
+            return;
+        std::vector<uint8_t> data(size);
+        if (!device.get_pipeline_cache_data(data.data(), size))
+            return;
+        const std::string temp = path + ".tmp";
+        if (std::FILE *f = std::fopen(temp.c_str(), "wb"))
+        {
+            const bool written = std::fwrite(data.data(), 1, size, f) == size;
+            std::fclose(f);
+            std::remove(path.c_str());
+            if (written && std::rename(temp.c_str(), path.c_str()) == 0)
+                std::fprintf(stderr, "[gpu] pipeline cache saved: %zu bytes\n", size);
+        }
     }
 
     // The shadow only sees arbiter packets. Any other GS input since initialisation means its state is incomplete.
@@ -623,6 +736,34 @@ struct GpuShadow::Impl
         return true;
     }
 
+    // `count` pixels from `src` into `pixels` as opaque RGBA (32-bit words, so the compiler vectorises it).
+    static void copyOpaque(std::vector<uint8_t> &pixels, const uint8_t *src, size_t count, bool bgra)
+    {
+        if (pixels.size() != count * 4)
+            pixels.resize(count * 4);
+        uint8_t *dst = pixels.data();
+        if (!bgra)
+        {
+            for (size_t i = 0; i < count; ++i)
+            {
+                uint32_t v;
+                std::memcpy(&v, src + i * 4, 4);
+                v |= 0xFF000000u;
+                std::memcpy(dst + i * 4, &v, 4);
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < count; ++i)
+            {
+                uint32_t v;
+                std::memcpy(&v, src + i * 4, 4);
+                v = (v & 0x0000FF00u) | ((v >> 16) & 0xFFu) | ((v & 0xFFu) << 16) | 0xFF000000u;
+                std::memcpy(dst + i * 4, &v, 4);
+            }
+        }
+    }
+
     // Waits for the copy in `p` (normally long finished) and converts it to RGBA.
     void finishReadback(PendingReadback &p, std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height)
     {
@@ -632,11 +773,11 @@ struct GpuShadow::Impl
         auto *src = static_cast<const uint8_t *>(device.map_host_buffer(*p.buffer, Vulkan::MEMORY_ACCESS_READ_BIT));
         if (!src)
             return;
-        pixels.assign(src, src + bytes);
+        // One pass over the frame: the copy out of the mapped buffer also makes it opaque (the CRTC outputs RGB only;
+        // the window blends with alpha) and, for a BGRA scanout, swaps red and blue. It used to be a copy and then
+        // one or two byte loops over the whole picture (10 MB at 2560x1022), every frame.
+        copyOpaque(pixels, src, size_t(p.width) * p.height, p.format == VK_FORMAT_B8G8R8A8_UNORM);
         device.unmap_host_buffer(*p.buffer, Vulkan::MEMORY_ACCESS_READ_BIT);
-        if (p.format == VK_FORMAT_B8G8R8A8_UNORM)
-            for (size_t i = 0; i < pixels.size(); i += 4)
-                std::swap(pixels[i], pixels[i + 2]);
         width = p.width;
         height = p.height;
     }
@@ -792,6 +933,316 @@ struct GpuShadow::Impl
             cmd->set_texture(0, 1, weights->get_view(), Vulkan::StockSampler::LinearClamp);
         });
         // The scanout goes back to TRANSFER_SRC (it may still be read), the result is handed on in TRANSFER_SRC.
+        cmd->image_barrier(*src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        cmd->image_barrier(*result, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        device.submit(cmd);
+        return result;
+    }
+
+    // SCENE LIGHTING: ambient occlusion computed from the game's own depth buffer. The Z buffer is read straight out
+    // of GS local memory (the single-sampled VRAM paraLLEl-GS keeps on the GPU) with the PSMZ32 swizzle, at the
+    // displayed buffer's position (DISPFB DBX/DBY) and single-sampled size; the occlusion then darkens the scanout.
+    // Level 1 normal, 2 strong, 3 shows the depth, 4 shows the occlusion (to check the depth is read right).
+    Vulkan::ImageHandle applyLighting(uint64_t guestFrame, const ParallelGS::ScanoutResult &scanout, int level)
+    {
+        const Vulkan::ImageHandle &src = scanout.image;
+        if (lightFailed || level <= 0 || !src)
+            return src;
+        const auto &priv = gs.get_priv_register_state();
+        const auto &dispfb = priv.pmode.EN2 ? priv.dispfb2 : priv.dispfb1;
+        const uint32_t fbp = dispfb.FBP, fbw = dispfb.FBW, fpsm = dispfb.PSM;
+        const uint32_t dbx = dispfb.DBX, dby = dispfb.DBY;
+        const uint32_t iw = scanout.internal_width, ih = scanout.internal_height;
+        // (FBP alternates between the two buffers every frame, so it is not part of the logged key.)
+        const uint64_t key = (uint64_t(fpsm) << 36) ^ (uint64_t(fbw) << 28) ^
+                             (uint64_t(dbx) << 16) ^ (uint64_t(dby) << 4) ^ (uint64_t(iw) << 48) ^ ih;
+        if (key != lightLoggedKey)
+        {
+            lightLoggedKey = key;
+            std::fprintf(stderr, "[gpu] frame=%llu scene lighting: displayed buffer FBP=%u FBW=%u PSM=%u at %u,%u, "
+                                 "size %ux%u (scanout %ux%u), depth from the scene depth buffer\n",
+                         static_cast<unsigned long long>(guestFrame), fbp, fbw, fpsm, dbx, dby, iw, ih,
+                         src->get_width(), src->get_height());
+        }
+        if (fpsm != 0 || fbw == 0 || iw < 16 || ih < 16)
+            return src; // only 32-bit colour buffers carry scene depth
+        Vulkan::BufferHandle vram = gs.get_scene_depth_buffer();
+        const uint32_t vramSize = gs.get_vram_size();
+        if (!vram || vramSize == 0 || (vramSize & (vramSize - 1)))
+            return src;
+        const VkDeviceSize vramOffset = 0;
+        const uint32_t zbp = fbp, zpsm = 0;
+        // Debug views, every ~2 s: copy the displayed buffer's scene depth back and log its distribution (log2 of Z
+        // at percentiles over a 1-in-16 pixel grid), to tune the lighting to the game's depth range.
+        if (level >= 3 && (guestFrame % 120) == 0)
+        {
+            const uint32_t pages = fbw * ((dby + ih + 31) / 32);
+            const VkDeviceSize base = VkDeviceSize(fbp) * 8192u;
+            const VkDeviceSize bytes = std::min<VkDeviceSize>(VkDeviceSize(pages) * 8192u, vramSize - base);
+            if (!lightStatsBuffer || lightStatsBuffer->get_create_info().size < bytes)
+            {
+                Vulkan::BufferCreateInfo info = {};
+                info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+                info.domain = Vulkan::BufferDomain::CachedHost;
+                info.size = bytes;
+                lightStatsBuffer = device.create_buffer(info);
+            }
+            if (lightStatsBuffer && base < vramSize)
+            {
+                auto copy = device.request_command_buffer();
+                copy->barrier(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                              VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+                copy->copy_buffer(*lightStatsBuffer, 0, *vram, base, bytes);
+                copy->barrier(VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                              VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
+                Vulkan::Fence fence;
+                device.submit(copy, &fence);
+                fence->wait();
+                const auto *w = static_cast<const uint32_t *>(
+                    device.map_host_buffer(*lightStatsBuffer, Vulkan::MEMORY_ACCESS_READ_BIT));
+                static const int kBlock32[32] = {0, 1, 4, 5, 16, 17, 20, 21, 2, 3, 6, 7, 18, 19, 22, 23,
+                                                 8, 9, 12, 13, 24, 25, 28, 29, 10, 11, 14, 15, 26, 27, 30, 31};
+                static const int kColumn32[64] = {0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
+                                                  16, 17, 20, 21, 24, 25, 28, 29, 18, 19, 22, 23, 26, 27, 30, 31,
+                                                  32, 33, 36, 37, 40, 41, 44, 45, 34, 35, 38, 39, 42, 43, 46, 47,
+                                                  48, 49, 52, 53, 56, 57, 60, 61, 50, 51, 54, 55, 58, 59, 62, 63};
+                std::vector<float> logs;
+                uint32_t zeros = 0, total = 0;
+                for (uint32_t y = 0; w && y < ih; y += 4)
+                    for (uint32_t x = 0; x < iw; x += 4)
+                    {
+                        const uint32_t px = x + dbx, py = y + dby;
+                        const uint32_t page = (py >> 5) * fbw + (px >> 6);
+                        const uint32_t addr = page * 2048u + uint32_t(kBlock32[((py >> 3) & 3) * 8 + ((px >> 3) & 7)]) * 64u +
+                                              uint32_t(kColumn32[(py & 7) * 8 + (px & 7)]);
+                        if (VkDeviceSize(addr) * 4 >= bytes)
+                            continue;
+                        ++total;
+                        const uint32_t z = w[addr];
+                        if (!z)
+                            ++zeros;
+                        else
+                            logs.push_back(std::log2(float(z)));
+                    }
+                if (w)
+                    device.unmap_host_buffer(*lightStatsBuffer, Vulkan::MEMORY_ACCESS_READ_BIT);
+                std::sort(logs.begin(), logs.end());
+                auto pct = [&](float q) { return logs.empty() ? 0.0f : logs[size_t(q * float(logs.size() - 1))]; };
+                if (!logs.empty())
+                    lightLogFar = pct(0.02f);
+                std::fprintf(stderr, "[gpu] scene depth: %u samples, %u empty; log2(z) min %.2f p5 %.2f p25 %.2f p50 %.2f "
+                                     "p75 %.2f p95 %.2f max %.2f\n",
+                             total, zeros, pct(0.0f), pct(0.05f), pct(0.25f), pct(0.5f), pct(0.75f), pct(0.95f),
+                             pct(1.0f));
+            }
+        }
+        if (!lightAo)
+        {
+            Vulkan::ResourceLayout vsLayout;
+            vsLayout.input_mask = 1u;
+            vsLayout.push_constant_size = 48;
+            Vulkan::Shader *vertex = device.request_shader(maximo_post_vert, sizeof(maximo_post_vert), &vsLayout);
+            Vulkan::ResourceLayout aoLayout;
+            aoLayout.output_mask = 1u;
+            aoLayout.push_constant_size = 48;
+            aoLayout.sets[0].storage_buffer_mask = 1u;
+            aoLayout.sets[0].meta[0].array_size = 1;
+            Vulkan::Shader *ao = device.request_shader(maximo_post_ao_frag, sizeof(maximo_post_ao_frag), &aoLayout);
+            Vulkan::ResourceLayout compLayout;
+            compLayout.output_mask = 1u;
+            compLayout.push_constant_size = 48;
+            compLayout.sets[0].sampled_image_mask = 3u;
+            compLayout.sets[0].fp_mask = 3u;
+            compLayout.sets[0].meta[0].array_size = 1;
+            compLayout.sets[0].meta[1].array_size = 1;
+            Vulkan::Shader *comp =
+                device.request_shader(maximo_post_light_frag, sizeof(maximo_post_light_frag), &compLayout);
+            if (vertex && ao && comp)
+            {
+                lightAo = device.request_program(vertex, ao);
+                lightComposite = device.request_program(vertex, comp);
+            }
+            if (!lightAo || !lightComposite)
+            {
+                std::fprintf(stderr, "[gpu] scene lighting setup failed; presenting without it\n");
+                lightFailed = true;
+                return src;
+            }
+            std::fprintf(stderr, "[gpu] scene lighting ready (ambient occlusion from the GS Z buffer)\n");
+        }
+        const uint32_t width = src->get_width(), height = src->get_height();
+        auto makeTarget = [&](uint32_t w, uint32_t h, VkFormat format, bool transferSrc) {
+            auto info = Vulkan::ImageCreateInfo::immutable_2d_image(w, h, format);
+            info.initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                         (transferSrc ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0);
+            return device.create_image(info);
+        };
+        Vulkan::ImageHandle aoImage = makeTarget(iw, ih, VK_FORMAT_R8G8B8A8_UNORM, false);
+        Vulkan::ImageHandle result = makeTarget(width, height, VK_FORMAT_R8G8B8A8_UNORM, true);
+        if (!aoImage || !result)
+            return src;
+        auto cmd = device.request_command_buffer();
+        // paraLLEl-GS wrote VRAM in compute; make it visible to the fragment shader.
+        cmd->barrier(VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
+        cmd->image_barrier(*src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, 0,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        auto pass = [&](const Vulkan::Image &target, const void *push, size_t pushSize, auto &&body) {
+            cmd->image_barrier(target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, 0, 0,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+            Vulkan::RenderPassInfo rp;
+            rp.num_color_attachments = 1;
+            rp.color_attachments[0] = &target.get_view();
+            rp.store_attachments = 1u << 0;
+            cmd->begin_render_pass(rp);
+            cmd->set_opaque_state();
+            body();
+            cmd->push_constants(push, 0, static_cast<uint32_t>(pushSize));
+            drawFullscreenTriangle(*cmd);
+            cmd->end_render_pass();
+            cmd->image_barrier(target, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        };
+        struct AoPush
+        {
+            uint32_t zinfo[4];
+            float area[4];
+            float params[4];
+        } aoPush = {{zbp * 2048u, fbw, zpsm == 1 ? 1u : 0u, vramSize / 4u - 1u},
+                    {float(dbx), float(dby), float(iw), float(ih)},
+                    {level >= 2 ? 9.0f : 7.0f, level >= 2 ? 1.6f : 1.1f, lightLogFar, level == 3 ? 1.0f : 0.0f}};
+        pass(*aoImage, &aoPush, sizeof(aoPush), [&] {
+            cmd->set_program(lightAo);
+            cmd->set_storage_buffer(0, 0, *vram, vramOffset, vramSize);
+        });
+        const float compPush[12] = {1.0f / float(width), 1.0f / float(height), 1.0f / float(iw), 1.0f / float(ih),
+                                    level >= 2 ? 1.0f : 0.8f, 0.0f, 0.0f, level >= 3 ? float(level - 2) : 0.0f,
+                                    0.0f, 0.0f, 0.0f, 0.0f};
+        pass(*result, compPush, sizeof(compPush), [&] {
+            cmd->set_program(lightComposite);
+            cmd->set_texture(0, 0, src->get_view(), Vulkan::StockSampler::LinearClamp);
+            cmd->set_texture(0, 1, aoImage->get_view(), Vulkan::StockSampler::LinearClamp);
+        });
+        cmd->image_barrier(*src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        cmd->image_barrier(*result, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+        device.submit(cmd);
+        return result;
+    }
+
+    // POST EFFECTS: the scanout (TRANSFER_SRC layout) with bloom and a light grade, returned in TRANSFER_SRC layout,
+    // or the scanout itself if the shaders could not be set up. Four passes: quarter-size bright pass, Gaussian blur
+    // across and down, then the composite at full size (picture + bloom, saturation, S-curve, tint, vignette).
+    Vulkan::ImageHandle applyPost(const Vulkan::ImageHandle &src, int level)
+    {
+        if (postFailed || level <= 0)
+            return src;
+        const uint32_t width = src->get_width(), height = src->get_height();
+        if (width < 16 || height < 16)
+            return src;
+        if (!postBright)
+        {
+            Vulkan::ResourceLayout vsLayout;
+            vsLayout.input_mask = 1u;
+            vsLayout.push_constant_size = 32;
+            Vulkan::Shader *vertex = device.request_shader(maximo_post_vert, sizeof(maximo_post_vert), &vsLayout);
+            auto fragment = [&](const uint32_t *fs, size_t fsSize, uint32_t samplers) -> Vulkan::Shader * {
+                Vulkan::ResourceLayout fsLayout;
+                fsLayout.output_mask = 1u;
+                fsLayout.push_constant_size = 32;
+                fsLayout.sets[0].sampled_image_mask = (1u << samplers) - 1u;
+                fsLayout.sets[0].fp_mask = (1u << samplers) - 1u;
+                for (uint32_t b = 0; b < samplers; ++b)
+                    fsLayout.sets[0].meta[b].array_size = 1;
+                return device.request_shader(fs, fsSize, &fsLayout);
+            };
+            Vulkan::Shader *bright = fragment(maximo_post_bright_frag, sizeof(maximo_post_bright_frag), 1);
+            Vulkan::Shader *blur = fragment(maximo_post_blur_frag, sizeof(maximo_post_blur_frag), 1);
+            Vulkan::Shader *composite = fragment(maximo_post_composite_frag, sizeof(maximo_post_composite_frag), 2);
+            if (vertex && bright && blur && composite)
+            {
+                postBright = device.request_program(vertex, bright);
+                postBlur = device.request_program(vertex, blur);
+                postComposite = device.request_program(vertex, composite);
+            }
+            if (!postBright || !postBlur || !postComposite)
+            {
+                std::fprintf(stderr, "[gpu] post effects setup failed; presenting without them\n");
+                postFailed = true;
+                return src;
+            }
+            std::fprintf(stderr, "[gpu] post effects ready (bloom + grade)\n");
+        }
+        const uint32_t qw = std::max(1u, width / 4), qh = std::max(1u, height / 4);
+        auto makeTarget = [&](uint32_t w, uint32_t h, bool transferSrc) {
+            auto info = Vulkan::ImageCreateInfo::immutable_2d_image(w, h, VK_FORMAT_R8G8B8A8_UNORM);
+            info.initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+            info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                         (transferSrc ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0);
+            return device.create_image(info);
+        };
+        Vulkan::ImageHandle bloomA = makeTarget(qw, qh, false), bloomB = makeTarget(qw, qh, false);
+        Vulkan::ImageHandle result = makeTarget(width, height, true);
+        if (!bloomA || !bloomB || !result)
+            return src;
+        // SOFT and STRONG: bloom threshold, bloom strength, saturation, curve, vignette.
+        const bool strong = level >= 2;
+        const float threshold = strong ? 0.45f : 0.6f;
+        const float compParams[4] = {strong ? 0.9f : 0.5f, strong ? 1.12f : 1.05f, strong ? 0.25f : 0.12f,
+                                     strong ? 0.3f : 0.15f};
+        auto cmd = device.request_command_buffer();
+        cmd->image_barrier(*src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                           VK_PIPELINE_STAGE_2_COPY_BIT, 0,
+                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        auto pass = [&](const Vulkan::Image &target, const float texel[2], const float params[4], auto &&body) {
+            cmd->image_barrier(target, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, 0, 0,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+            Vulkan::RenderPassInfo rp;
+            rp.num_color_attachments = 1;
+            rp.color_attachments[0] = &target.get_view();
+            rp.store_attachments = 1u << 0;
+            cmd->begin_render_pass(rp);
+            cmd->set_opaque_state();
+            body();
+            const float push[8] = {texel[0], texel[1], 0.0f, 0.0f, params[0], params[1], params[2], params[3]};
+            cmd->push_constants(push, 0, sizeof(push));
+            drawFullscreenTriangle(*cmd);
+            cmd->end_render_pass();
+            cmd->image_barrier(target, VK_IMAGE_LAYOUT_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+        };
+        const float srcTexel[2] = {1.0f / float(width), 1.0f / float(height)};
+        const float qTexel[2] = {1.0f / float(qw), 1.0f / float(qh)};
+        const float brightParams[4] = {threshold, 0.0f, 0.0f, 0.0f};
+        const float acrossParams[4] = {1.0f, 0.0f, 0.0f, 0.0f}, downParams[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+        pass(*bloomA, srcTexel, brightParams, [&] {
+            cmd->set_program(postBright);
+            cmd->set_texture(0, 0, src->get_view(), Vulkan::StockSampler::LinearClamp);
+        });
+        pass(*bloomB, qTexel, acrossParams, [&] {
+            cmd->set_program(postBlur);
+            cmd->set_texture(0, 0, bloomA->get_view(), Vulkan::StockSampler::LinearClamp);
+        });
+        pass(*bloomA, qTexel, downParams, [&] {
+            cmd->set_program(postBlur);
+            cmd->set_texture(0, 0, bloomB->get_view(), Vulkan::StockSampler::LinearClamp);
+        });
+        pass(*result, srcTexel, compParams, [&] {
+            cmd->set_program(postComposite);
+            cmd->set_texture(0, 0, src->get_view(), Vulkan::StockSampler::LinearClamp);
+            cmd->set_texture(0, 1, bloomA->get_view(), Vulkan::StockSampler::LinearClamp);
+        });
         cmd->image_barrier(*src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
                            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
@@ -986,8 +1437,13 @@ struct GpuShadow::Impl
         gs.flush();
         auto scanout = gs.vsync(info);
         ++vsyncs;
+        if (vsyncs == 3600) // (a minute in: most pipelines exist by then)
+            savePipelineCache();
         if (smaa && presenting && !capture && !syncReadback && scanout.image)
             scanout.image = applySmaa(guestFrame, scanout.image);
+        // Scene lighting from the scene depth the Maximo ubershader records (the game's Z buffer is nearly empty).
+        if (presenting && !capture && !syncReadback && scanout.image && GpuShadow::lightLevel() > 0)
+            scanout.image = applyLighting(guestFrame, scanout, GpuShadow::lightLevel());
         if (fsr && presenting && !capture && !syncReadback && scanout.image)
             scanout.image = applyFsr(guestFrame, scanout.image);
         bool ok = true;
@@ -1022,11 +1478,7 @@ struct GpuShadow::Impl
                 nextReadback ^= 1u;
                 ok = startReadback(guestFrame, scanout, submit);
                 if (ok && show.valid)
-                {
-                    finishReadback(show, framePixels, width, height);
-                    for (size_t i = 3; i < framePixels.size(); i += 4)
-                        framePixels[i] = 0xFF;
-                }
+                    finishReadback(show, framePixels, width, height); // (already opaque: copyOpaque)
                 publish = width != 0; // nothing to show on the first frame
             }
             else
@@ -1044,9 +1496,24 @@ struct GpuShadow::Impl
             if (ok && publish)
             {
                 std::lock_guard<std::mutex> lock(frameMutex);
-                presentPixels.swap(framePixels);
-                presentWidth = width;
-                presentHeight = height;
+                if (frameQueue.size() >= kQueueMax) // the window stopped taking frames (a stall): keep the newest
+                {
+                    spareBuffers.push_back(std::move(frameQueue.front().pixels));
+                    frameQueue.pop_front();
+                    queueDropped.fetch_add(1, std::memory_order_relaxed);
+                }
+                frameQueue.emplace_back();
+                QueuedFrame &queued = frameQueue.back();
+                queued.pixels.swap(framePixels);
+                queued.width = width;
+                queued.height = height;
+                queued.guestFrame = guestFrame;
+                if (!spareBuffers.empty()) // the next frame is read back into a recycled buffer
+                {
+                    framePixels.swap(spareBuffers.back());
+                    spareBuffers.pop_back();
+                }
+                std::vector<uint8_t> &presentPixels = queued.pixels;
                 ++presentGeneration;
                 ps2_pacing_trace::note(ps2_pacing_trace::kPublish, static_cast<uint32_t>(guestFrame), presentGeneration);
                 noteBrightness(presentPixels, width, height);
@@ -1106,17 +1573,44 @@ struct GpuShadow::Impl
                now.localToHost == atInit.localToHost;
     }
 
-    bool takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height)
+    bool takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height, uint64_t *guestFrame = nullptr)
     {
         std::lock_guard<std::mutex> lock(frameMutex);
-        if (presentGeneration == takenGeneration || presentPixels.empty())
+        if (frameQueue.empty())
             return false;
-        takenGeneration = presentGeneration;
+        // More than one frame waiting at ten presents in a row (the window shows fewer frames than the game makes, e.g.
+        // 120 Hz gameplay on a 60 Hz screen with VSync): the queue only adds latency, so skip one.
+        if (frameQueue.size() >= 2)
+        {
+            if (++backlogTakes >= 10)
+            {
+                backlogTakes = 0;
+                spareBuffers.push_back(std::move(frameQueue.front().pixels));
+                frameQueue.pop_front();
+                queueTrimmed.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+        else
+            backlogTakes = 0;
+        QueuedFrame &front = frameQueue.front();
+        if (front.pixels.empty())
+        {
+            frameQueue.pop_front();
+            return false;
+        }
+        if (guestFrame)
+            *guestFrame = front.guestFrame;
+        ++takenGeneration;
         healthTaken.fetch_add(1, std::memory_order_relaxed);
         ps2_pacing_trace::note(ps2_pacing_trace::kTake, 0, takenGeneration);
-        pixels = presentPixels;
-        width = presentWidth;
-        height = presentHeight;
+        // The buffers change hands instead of the picture being copied (10 MB a frame at 2560x1022): the window
+        // keeps this frame, and its old buffer comes back to be filled by a later one.
+        pixels.swap(front.pixels);
+        width = front.width;
+        height = front.height;
+        if (!front.pixels.empty())
+            spareBuffers.push_back(std::move(front.pixels));
+        frameQueue.pop_front();
         return true;
     }
 };
@@ -1149,6 +1643,10 @@ void GpuShadow::enablePresentation() { impl->presenting = true; }
 bool GpuShadow::takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height)
 {
     return impl->takeFrame(pixels, width, height);
+}
+bool GpuShadow::takeFrame(std::vector<uint8_t> &pixels, uint32_t &width, uint32_t &height, uint64_t &guestFrame)
+{
+    return impl->takeFrame(pixels, width, height, &guestFrame);
 }
 uint64_t GpuShadow::packetCount() const { return impl->packets; }
 

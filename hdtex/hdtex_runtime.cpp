@@ -350,6 +350,9 @@ struct Runtime::Impl
         const bool texa = psm == PSMCT24 || psm == PSMCT16 || psm == PSMCT16S || (palette && cpsm != PSMCT32);
         if (texa)
             k.bits |= uint32_t(q.texa & 0xff) << 15 | uint32_t((q.texa >> 15) & 1) << 23 | uint32_t((q.texa >> 32) & 0xff) << 24;
+        // PCSX2 names include TCC (bit 14). paraLLEl-GS caches one image for both TCC values, so a texture is
+        // classified by whichever draw makes it first: the lookup tries that draw's TCC, then the other one.
+        k.bits |= uint32_t((t >> 34) & 1) << 14;
         // Extraction for new art: MAXIMO_HDTEX_DUMP_HASH=<tex hash>: for each palette of that T8 texture, write
         // <pack name>.t8.bin (the palette in index order, then the texture's blocks in raster order).
         static const uint64_t dumpHash = [] { const char *v = std::getenv("MAXIMO_HDTEX_DUMP_HASH"); return v ? std::strtoull(v, nullptr, 16) : 0ull; }();
@@ -390,6 +393,12 @@ struct Runtime::Impl
         if (std::find(keep.begin(), keep.end(), k.tex) != keep.end())
             return 0;
         auto it = byKey.find(k);
+        if (it == byKey.end()) {
+            Key other = k;
+            other.bits ^= 1u << 14;
+            it = byKey.find(other);
+            if (it != byKey.end()) k = other;
+        }
         if (it == byKey.end()) {
             if (logMisses && missLogged.size() < 4096 && missLogged.emplace(k, true).second)
                 std::fprintf(stderr, "[hdtex] no replacement: %s (tbp=%x tbw=%u %ux%u)\n", hexName(k).c_str(), tbp, tbw,

@@ -1,0 +1,2713 @@
+{
+  "version": 4,
+  "items": {
+    "0x21": {
+      "weight": 100.0,
+      "enabled": true
+    },
+    "0x46": {
+      "weight": 13.2,
+      "enabled": true
+    },
+    "0x52": {
+      "weight": 8.9,
+      "enabled": true
+    },
+    "0x25": {
+      "weight": 36.1,
+      "enabled": true
+    },
+    "0x5B": {
+      "weight": 11.0,
+      "enabled": true
+    },
+    "0x65": {
+      "weight": 5.7,
+      "enabled": true
+    },
+    "0x45": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x51": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x4E": {
+      "weight": 0.2,
+      "enabled": true
+    },
+    "0x24": {
+      "weight": 5.3,
+      "enabled": true
+    },
+    "0x20": {
+      "weight": 5.9,
+      "enabled": true
+    }
+  },
+  "structures": {
+    "0x0A": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x01": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x02": {
+      "weight": 5.3,
+      "enabled": true
+    },
+    "0xB0": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x30": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0xA0": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xC9": {
+      "weight": 0.6,
+      "enabled": true
+    },
+    "0xAE": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xD3": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x6C": {
+      "weight": 2.1,
+      "enabled": true
+    },
+    "0xC8": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xB5": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xBB": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x17": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xB1": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x7C": {
+      "weight": 1.1,
+      "enabled": true
+    },
+    "0x1B": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x18": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xAA": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0xAD": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x4A": {
+      "weight": 0.6,
+      "enabled": true
+    },
+    "0xBC": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x50": {
+      "weight": 1.7,
+      "enabled": true
+    },
+    "0x5F": {
+      "weight": 2.5,
+      "enabled": true
+    }
+  },
+  "enemies": {
+    "grave": {
+      "0x47": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x2F": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x39": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x54": {
+        "weight": 40.0,
+        "enabled": true
+      },
+      "0x48": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6A": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x6B": {
+        "weight": 30.0,
+        "enabled": true
+      },
+      "0x37": {
+        "weight": 20.0,
+        "enabled": true
+      }
+    },
+    "under": {
+      "0x47": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x2F": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x39": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x54": {
+        "weight": 40.0,
+        "enabled": true
+      },
+      "0x49": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x48": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6A": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x6B": {
+        "weight": 30.0,
+        "enabled": true
+      },
+      "0x13": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x27": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x5D": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "swamp": {
+      "0x47": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x2F": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x39": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x54": {
+        "weight": 40.0,
+        "enabled": true
+      },
+      "0x48": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6A": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x19": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x0D": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6B": {
+        "weight": 30.0,
+        "enabled": true
+      },
+      "0x37": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x08": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "ice": {
+      "0x47": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x39": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x54": {
+        "weight": 40.0,
+        "enabled": true
+      },
+      "0x49": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x3A": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x10": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6B": {
+        "weight": 30.0,
+        "enabled": true
+      },
+      "0x1D": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "castle": {
+      "0x47": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x2F": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x39": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x54": {
+        "weight": 40.0,
+        "enabled": true
+      },
+      "0x49": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x48": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6A": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x6B": {
+        "weight": 30.0,
+        "enabled": true
+      },
+      "0x37": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x08": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x53": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x58": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x16": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    }
+  },
+  "enemy_tiers": {
+    "grave": {
+      "0x47": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x39": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x48": {
+        "0": 25.0,
+        "1": 25.0,
+        "2": 50.0
+      },
+      "0x54": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      }
+    },
+    "under": {
+      "0x47": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x39": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x48": {
+        "0": 25.0,
+        "1": 25.0,
+        "2": 50.0
+      },
+      "0x49": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x54": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      }
+    },
+    "swamp": {
+      "0x47": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x39": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x48": {
+        "0": 25.0,
+        "1": 25.0,
+        "2": 50.0
+      },
+      "0x54": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x08": {
+        "0": 50.0,
+        "1": 50.0
+      }
+    },
+    "ice": {
+      "0x47": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x39": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x49": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x54": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x3A": {
+        "0": 50.0,
+        "2": 50.0
+      }
+    },
+    "castle": {
+      "0x47": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x39": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x49": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x54": {
+        "0": 50.0,
+        "1": 50.0,
+        "2": 50.0
+      },
+      "0x08": {
+        "0": 50.0,
+        "1": 50.0
+      }
+    }
+  },
+  "specials": {
+    "mimic": {
+      "weight": 12.0,
+      "enabled": true
+    },
+    "wizard": {
+      "weight": 10.0,
+      "enabled": true
+    }
+  },
+  "ability_drops": {
+    "0x00": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x01": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x02": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x03": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x04": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x05": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x06": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x07": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x08": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x09": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0A": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0B": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0C": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0D": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0E": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x0F": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x10": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x11": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x12": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x13": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x14": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x15": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x16": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x17": {
+      "weight": 10.0,
+      "enabled": false
+    },
+    "0x18": {
+      "weight": 10.0,
+      "enabled": false
+    }
+  },
+  "arrivals": {
+    "grave": {
+      "0x08|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x0D|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x10|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x13|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x16|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x19|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x1D|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x27|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x3A|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x49|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x53|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x58|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x5D|under": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "under": {
+      "0x0D|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x10|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x16|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x19|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x1D|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x37|castle": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x3A|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x53|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x58|castle": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "swamp": {
+      "0x10|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x13|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x16|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x1D|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x27|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x3A|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x49|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x53|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x58|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x5D|under": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    },
+    "ice": {
+      "0x0D|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x13|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x16|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x19|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x27|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x2F|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x37|castle": {
+        "weight": 20.0,
+        "enabled": true
+      },
+      "0x48|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x53|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x58|castle": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x5D|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x6A|castle": {
+        "weight": 20.0,
+        "enabled": true
+      }
+    },
+    "castle": {
+      "0x0D|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x10|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x13|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x19|swamp": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x1D|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x27|under": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x3A|ice": {
+        "weight": 100.0,
+        "enabled": true
+      },
+      "0x5D|under": {
+        "weight": 100.0,
+        "enabled": true
+      }
+    }
+  },
+  "structure_arrivals": {
+    "grave": {
+      "0x17|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x18|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x1B|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x4A|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x50|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x7C|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAA|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAD|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAE|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB1|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB5|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBB|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBC|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC8|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xD3|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      }
+    },
+    "under": {
+      "0x01|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x02|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x0A|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x17|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x18|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x1B|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x30|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x4A|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x50|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x7C|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xA0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAA|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAD|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB1|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB5|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBB|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBC|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC8|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC9|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xD3|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      }
+    },
+    "swamp": {
+      "0x01|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x02|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x0A|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x17|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x18|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x1B|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x30|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x4A|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x50|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x7C|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xA0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAA|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAD|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAE|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB1|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBC|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC9|grave": {
+        "weight": 5.3,
+        "enabled": false
+      }
+    },
+    "ice": {
+      "0x01|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x02|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x0A|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x30|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x4A|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x50|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x6C|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xA0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAA|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAD|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAE|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB5|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBB|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBC|castle": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC8|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC9|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xD3|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      }
+    },
+    "castle": {
+      "0x01|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x02|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x0A|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x17|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x18|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x1B|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x30|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x6C|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0x7C|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xA0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xAE|under": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB0|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB1|ice": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xB5|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xBB|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC8|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xC9|grave": {
+        "weight": 5.3,
+        "enabled": false
+      },
+      "0xD3|swamp": {
+        "weight": 5.3,
+        "enabled": false
+      }
+    }
+  },
+  "structure_selection_explicit": false,
+  "unified": {
+    "enemy_share_target": 0.0,
+    "cross_world_enemies_enabled": false,
+    "cross_world_structures_enabled": false,
+    "weights": {
+      "grave": {
+        "enemy:0x08-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x0D-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x10-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x13-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x16-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x19-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x1D-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x27-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x3A-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x49-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x53-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x58-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x5D-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x01": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x02": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x0A": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x17": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x18": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x1B": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x20": {
+          "weight": 28.0,
+          "enabled": true
+        },
+        "native:0x21": {
+          "weight": 471.0,
+          "enabled": true
+        },
+        "native:0x24": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x25": {
+          "weight": 170.0,
+          "enabled": true
+        },
+        "native:0x2B": {
+          "weight": 0.0,
+          "enabled": true
+        },
+        "native:0x2F": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x30": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x37": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x39": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x45": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x46": {
+          "weight": 62.0,
+          "enabled": true
+        },
+        "native:0x47": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x48": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x4A": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x4E": {
+          "weight": 1.0,
+          "enabled": true
+        },
+        "native:0x50": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x51": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x52": {
+          "weight": 42.0,
+          "enabled": true
+        },
+        "native:0x54": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x5B": {
+          "weight": 52.0,
+          "enabled": true
+        },
+        "native:0x5F": {
+          "weight": 12.0,
+          "enabled": true
+        },
+        "native:0x65": {
+          "weight": 27.0,
+          "enabled": true
+        },
+        "native:0x6A": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x6B": {
+          "weight": 9.0,
+          "enabled": true
+        },
+        "native:0x6C": {
+          "weight": 10.0,
+          "enabled": true
+        },
+        "native:0x7C": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xA0": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAA": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAD": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAE": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB0": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xB1": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB5": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBB": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBC": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC8": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC9": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0xD3": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "structure:0x17-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x18-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x1B-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x4A-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x50-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x7C-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAA-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAD-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAE-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB1-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB5-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBB-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBC-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC8-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xD3-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        }
+      },
+      "under": {
+        "enemy:0x0D-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x10-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x16-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x19-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x1D-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x37-castle": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "enemy:0x3A-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x53-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x58-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x01": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x02": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x0A": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x13": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x17": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x18": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x1B": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x20": {
+          "weight": 28.0,
+          "enabled": true
+        },
+        "native:0x21": {
+          "weight": 471.0,
+          "enabled": true
+        },
+        "native:0x24": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x25": {
+          "weight": 170.0,
+          "enabled": true
+        },
+        "native:0x27": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x2B": {
+          "weight": 0.0,
+          "enabled": true
+        },
+        "native:0x2F": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x30": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x39": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x45": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x46": {
+          "weight": 62.0,
+          "enabled": true
+        },
+        "native:0x47": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x48": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x49": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x4A": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x4E": {
+          "weight": 1.0,
+          "enabled": true
+        },
+        "native:0x50": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x51": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x52": {
+          "weight": 42.0,
+          "enabled": true
+        },
+        "native:0x54": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x5B": {
+          "weight": 52.0,
+          "enabled": true
+        },
+        "native:0x5D": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x5F": {
+          "weight": 12.0,
+          "enabled": true
+        },
+        "native:0x65": {
+          "weight": 27.0,
+          "enabled": true
+        },
+        "native:0x6A": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x6B": {
+          "weight": 9.0,
+          "enabled": true
+        },
+        "native:0x6C": {
+          "weight": 10.0,
+          "enabled": true
+        },
+        "native:0x7C": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xA0": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAA": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAD": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAE": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB0": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xB1": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB5": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBB": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBC": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC8": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC9": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0xD3": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "structure:0x01-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x02-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x0A-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x17-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x18-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x1B-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x30-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x4A-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x50-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x7C-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xA0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAA-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAD-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB1-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB5-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBB-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBC-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC8-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC9-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xD3-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        }
+      },
+      "swamp": {
+        "enemy:0x10-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x13-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x16-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x1D-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x27-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x3A-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x49-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x53-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x58-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x5D-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x01": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x02": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x08": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x0A": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x0D": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x17": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x18": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x19": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x1B": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x20": {
+          "weight": 28.0,
+          "enabled": true
+        },
+        "native:0x21": {
+          "weight": 471.0,
+          "enabled": true
+        },
+        "native:0x24": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x25": {
+          "weight": 170.0,
+          "enabled": true
+        },
+        "native:0x2B": {
+          "weight": 0.0,
+          "enabled": true
+        },
+        "native:0x2F": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x30": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x37": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x39": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x45": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x46": {
+          "weight": 62.0,
+          "enabled": true
+        },
+        "native:0x47": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x48": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x4A": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x4E": {
+          "weight": 1.0,
+          "enabled": true
+        },
+        "native:0x50": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x51": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x52": {
+          "weight": 42.0,
+          "enabled": true
+        },
+        "native:0x54": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x5B": {
+          "weight": 52.0,
+          "enabled": true
+        },
+        "native:0x5F": {
+          "weight": 12.0,
+          "enabled": true
+        },
+        "native:0x65": {
+          "weight": 27.0,
+          "enabled": true
+        },
+        "native:0x6A": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x6B": {
+          "weight": 9.0,
+          "enabled": true
+        },
+        "native:0x6C": {
+          "weight": 10.0,
+          "enabled": true
+        },
+        "native:0x7C": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xA0": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAA": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAD": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAE": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB0": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xB1": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB5": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBB": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBC": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC8": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC9": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0xD3": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "structure:0x01-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x02-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x0A-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x17-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x18-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x1B-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x30-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x4A-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x50-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x7C-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xA0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAA-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAD-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAE-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB1-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBC-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC9-grave": {
+          "weight": 25.0,
+          "enabled": true
+        }
+      },
+      "ice": {
+        "enemy:0x0D-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x13-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x16-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x19-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x27-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x2F-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x37-castle": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "enemy:0x48-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x53-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x58-castle": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x5D-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x6A-castle": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x01": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x02": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x0A": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x10": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x17": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x18": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x1B": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x1D": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x20": {
+          "weight": 28.0,
+          "enabled": true
+        },
+        "native:0x21": {
+          "weight": 471.0,
+          "enabled": true
+        },
+        "native:0x24": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x25": {
+          "weight": 170.0,
+          "enabled": true
+        },
+        "native:0x2B": {
+          "weight": 0.0,
+          "enabled": true
+        },
+        "native:0x30": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x39": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x3A": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x45": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x46": {
+          "weight": 62.0,
+          "enabled": true
+        },
+        "native:0x47": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x49": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x4A": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x4E": {
+          "weight": 1.0,
+          "enabled": true
+        },
+        "native:0x50": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x51": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x52": {
+          "weight": 42.0,
+          "enabled": true
+        },
+        "native:0x54": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x5B": {
+          "weight": 52.0,
+          "enabled": true
+        },
+        "native:0x5F": {
+          "weight": 12.0,
+          "enabled": true
+        },
+        "native:0x65": {
+          "weight": 27.0,
+          "enabled": true
+        },
+        "native:0x6B": {
+          "weight": 9.0,
+          "enabled": true
+        },
+        "native:0x6C": {
+          "weight": 10.0,
+          "enabled": true
+        },
+        "native:0x7C": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xA0": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAA": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAD": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAE": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB0": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xB1": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB5": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBB": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBC": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC8": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC9": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0xD3": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "structure:0x01-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x02-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x0A-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x30-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x4A-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x50-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x6C-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xA0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAA-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAD-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAE-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB5-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBB-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBC-castle": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC8-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC9-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xD3-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        }
+      },
+      "castle": {
+        "enemy:0x0D-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x10-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x13-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x19-swamp": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x1D-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x27-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x3A-ice": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "enemy:0x5D-under": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x01": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x02": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x08": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x0A": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x16": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x17": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x18": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x1B": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x20": {
+          "weight": 28.0,
+          "enabled": true
+        },
+        "native:0x21": {
+          "weight": 471.0,
+          "enabled": true
+        },
+        "native:0x24": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "native:0x25": {
+          "weight": 170.0,
+          "enabled": true
+        },
+        "native:0x2B": {
+          "weight": 0.0,
+          "enabled": true
+        },
+        "native:0x2F": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x30": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x37": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x39": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x45": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x46": {
+          "weight": 62.0,
+          "enabled": true
+        },
+        "native:0x47": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x48": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x49": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x4A": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0x4E": {
+          "weight": 1.0,
+          "enabled": true
+        },
+        "native:0x50": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0x51": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0x52": {
+          "weight": 42.0,
+          "enabled": true
+        },
+        "native:0x53": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x54": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x58": {
+          "weight": 15.0,
+          "enabled": true
+        },
+        "native:0x5B": {
+          "weight": 52.0,
+          "enabled": true
+        },
+        "native:0x5F": {
+          "weight": 12.0,
+          "enabled": true
+        },
+        "native:0x65": {
+          "weight": 80.0,
+          "enabled": true
+        },
+        "native:0x6A": {
+          "weight": 6.0,
+          "enabled": true
+        },
+        "native:0x6B": {
+          "weight": 9.0,
+          "enabled": true
+        },
+        "native:0x6C": {
+          "weight": 10.0,
+          "enabled": true
+        },
+        "native:0x7C": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xA0": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAA": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAD": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xAE": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB0": {
+          "weight": 5.0,
+          "enabled": true
+        },
+        "native:0xB1": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xB5": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBB": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xBC": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC8": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "native:0xC9": {
+          "weight": 3.0,
+          "enabled": true
+        },
+        "native:0xD3": {
+          "weight": 8.0,
+          "enabled": true
+        },
+        "structure:0x01-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x02-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x0A-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x17-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x18-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x1B-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x30-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x6C-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0x7C-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xA0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xAE-under": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB0-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB1-ice": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xB5-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xBB-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC8-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xC9-grave": {
+          "weight": 25.0,
+          "enabled": true
+        },
+        "structure:0xD3-swamp": {
+          "weight": 25.0,
+          "enabled": true
+        }
+      }
+    },
+    "selection_explicit": {
+      "grave": false,
+      "under": false,
+      "swamp": false,
+      "ice": false,
+      "castle": false
+    }
+  }
+}

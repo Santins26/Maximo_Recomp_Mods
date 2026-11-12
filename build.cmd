@@ -1,6 +1,9 @@
 @echo off
 rem Maximo-GTG: builds the game from your own disc. See README.md.
-rem   build.cmd <your disc .iso or extracted disc folder> [--no-ffmpeg]
+rem   build.cmd <your disc .iso, .bin/.cue or extracted disc folder> [--no-ffmpeg]
+rem The PAL (SLES-50703), USA (SLUS-20017) and Japanese (SLPM-62127) discs all work. A PAL disc builds into build,
+rem generated and dist as always; a USA or Japanese one into build-usa / generated-usa / dist-usa (or -jpn), so the
+rem builds of different releases can sit side by side.
 rem MAXIMO_CMAKE_ARGS, if set, is passed to every CMake configure.
 setlocal EnableExtensions
 set "ROOT=%~dp0"
@@ -42,6 +45,25 @@ cmake -S "%ROOT%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DMAXIMO_TOOL
 cmake --build "%BUILD%" --target ps2_recomp ps2x_vu1aot maximo_kit || exit /b 1
 
 echo [3/6] Reading your disc...
+set "REGION="
+for /f "usebackq delims=" %%r in (`call "%BUILD%\maximo_kit.exe" region "%DISC%"`) do set "REGION=%%r"
+if "%REGION%"=="" (
+    "%BUILD%\maximo_kit.exe" region "%DISC%"
+    exit /b 1
+)
+set "GAMEBUILD=%BUILD%"
+set "REGION_ARGS=-DMAXIMO_REGION=PAL"
+if /i "%REGION%"=="PAL" goto region_set
+if /i "%REGION%"=="USA" set "SUFFIX=-usa"
+if /i "%REGION%"=="JPN" set "SUFFIX=-jpn"
+set "GEN=%ROOT%\generated%SUFFIX%"
+set "DIST=%ROOT%\dist%SUFFIX%"
+set "GAMEBUILD=%ROOT%\build%SUFFIX%"
+set "REGION_ARGS=-G Ninja -DCMAKE_BUILD_TYPE=Release -DMAXIMO_REGION=%REGION% -DGENERATED_DIR=%GEN:\=/%/game -DMAXIMO_VU1AOT_DIR=%GEN:\=/%/vu1aot"
+:region_set
+echo The disc is the %REGION% release: building into "%DIST%".
+rem rebuild.cmd with no release named rebuilds this one.
+> "%ROOT%\build_region.txt" echo %REGION%
 if exist "%GEN%" rmdir /s /q "%GEN%"
 "%BUILD%\maximo_kit.exe" prepare "%DISC%" "%ROOT%" "%GEN%" || exit /b 1
 
@@ -77,13 +99,14 @@ set "FFMPEG_ARG=-DMAXIMO_FFMPEG_DIR=%ROOT:\=/%/deps/ffmpeg"
 :ffmpeg_done
 
 echo [5/6] Compiling the game, which takes a while...
-cmake -S "%ROOT%" -B "%BUILD%" -DMAXIMO_TOOLS_ONLY=OFF "%FFMPEG_ARG%" %MAXIMO_CMAKE_ARGS% || exit /b 1
-cmake --build "%BUILD%" --target maximo_boot || exit /b 1
+cmake -S "%ROOT%" -B "%GAMEBUILD%" -DMAXIMO_TOOLS_ONLY=OFF %REGION_ARGS% "%FFMPEG_ARG%" %MAXIMO_CMAKE_ARGS% || exit /b 1
+cmake --build "%GAMEBUILD%" --target maximo_boot || exit /b 1
 
 echo [6/6] Installing into dist...
 if not exist "%DIST%\game" mkdir "%DIST%\game"
-copy /y "%BUILD%\maximo_boot.exe" "%DIST%\game\" >nul || exit /b 1
-if "%USE_FFMPEG%"=="1" copy /y "%BUILD%\*.dll" "%DIST%\game\" >nul
+copy /y "%GAMEBUILD%\maximo_boot.exe" "%DIST%\game\" >nul || exit /b 1
+copy /y "%GEN%\region.txt" "%DIST%\game\" >nul || exit /b 1
+if "%USE_FFMPEG%"=="1" copy /y "%GAMEBUILD%\*.dll" "%DIST%\game\" >nul
 call "%ROOT%\launcher\build.cmd" "%DIST%" || exit /b 1
 copy /y "%ROOT%\LICENSE" "%DIST%\" >nul
 copy /y "%ROOT%\THIRD_PARTY_NOTICES.txt" "%DIST%\" >nul
@@ -95,7 +118,7 @@ echo Keep the dist folder to yourself: it contains the game's code.
 exit /b 0
 
 :usage
-echo usage: build.cmd ^<your disc .iso or extracted disc folder^> [--no-ffmpeg]
+echo usage: build.cmd ^<your disc .iso, .cue or extracted disc folder^> [--no-ffmpeg]
 exit /b 2
 :no_vs
 echo Error: Visual Studio with the "Desktop development with C++" workload was not found.
