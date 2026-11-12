@@ -19,8 +19,8 @@ class LauncherForm : Form
     static readonly Rectangle PageArea = new Rectangle(446, 356, 1040, 496);
     static readonly Rectangle PlayArea = new Rectangle(48, 368, 362, 76);
     static readonly Rectangle MinimizeArea = new Rectangle(1330, 60, 44, 34), CloseArea = new Rectangle(1378, 60, 44, 34);
-    static readonly string[] NavNames = { "Graphics", "Controls", "Enhancements", "HD Textures", "Game Files", "About", "Credits" };
-    static readonly string[] NavIcons = { "icon_graphics.png", "icon_controls.png", "icon_enhancements.png", "icon_hd.png", "icon_folder.png", "icon_about.png", null };
+    static readonly string[] NavNames = { "Graphics", "Controls", "Enhancements", "Randomizer", "HD Textures", "Game Files", "About", "Credits" };
+    static readonly string[] NavIcons = { "icon_graphics.png", "icon_controls.png", "icon_enhancements.png", "icon_play.png", "icon_hd.png", "icon_folder.png", "icon_about.png", null };
     public static readonly Color Text1 = Color.FromArgb(238, 230, 214), Text2 = Color.FromArgb(178, 168, 186), Gold = Color.FromArgb(232, 178, 52);
     public static readonly Color Good = Color.FromArgb(150, 226, 120), Bad = Color.FromArgb(255, 160, 120);
     static readonly Color Dark = Color.FromArgb(20, 15, 26), WindowBack = Color.FromArgb(12, 9, 18);
@@ -29,7 +29,7 @@ class LauncherForm : Form
     readonly Bitmap shell, buttonPlay, buttonNormal, buttonHover, buttonPressed, iconPlay;
     readonly Bitmap[] navIcons = new Bitmap[NavNames.Length];
     Bitmap banner, pageBack;
-    const int BuildPage = 7; // after the menu's pages; only the Build button opens it
+    const int BuildPage = 8; // after the menu's pages; only the Build button opens it
     readonly Panel[] pages = new Panel[NavNames.Length + 1];
     int page = -1, hover = -2, pressed = -2; // -1 = Play, -3 = minimize, -4 = close
     bool busy, building;
@@ -47,6 +47,11 @@ class LauncherForm : Form
     readonly Button rebuild = new Button(), cancelBuild = new Button();
     readonly Label buildStage = new Label();
     readonly ProgressBar buildBar = new ProgressBar();
+    readonly CheckBox rndOn = new CheckBox(), rndEnemies = new CheckBox(), rndStructures = new CheckBox(), rndItems = new CheckBox();
+    readonly CheckBox rndSkills = new CheckBox(), rndChests = new CheckBox(), rndBossEnemies = new CheckBox(), rndBossArenas = new CheckBox();
+    readonly TextBox rndSeed = new TextBox();
+    readonly Button rndNewSeed = new Button(), rndSpawnEditor = new Button(), rndBalanced = new Button();
+    readonly Label rndState = new Label();
 
     static Bitmap Art(string name)
     {
@@ -63,7 +68,7 @@ class LauncherForm : Form
 
     int R(float v) { return (int)Math.Round(v * scale); }
     Rectangle R(Rectangle r) { return new Rectangle(R(r.X), R(r.Y), R(r.Width), R(r.Height)); }
-    Rectangle NavArea(int i) { return new Rectangle(64, 452 + i * 66, 336, 60); }
+    Rectangle NavArea(int i) { return new Rectangle(64, 452 + i * 60, 336, 56); } // (eight entries)
 
     public LauncherForm()
     {
@@ -442,6 +447,68 @@ class LauncherForm : Form
         p.Controls.Add(b);
     }
 
+    // ---- the Randomizer page (Randomizer.cs) ----
+    void BuildRandomizerPage(Panel p, ToolTip tips)
+    {
+        Tick(p, rndOn, "Randomize the game (the game does it as each level loads)", Randomizer.Enabled, 28, 72, 600,
+             delegate { Randomizer.Enabled = rndOn.Checked; RefreshRandomizer(); Picture.Save(); });
+        Text2Label(p, "Always with the cross-world enemies and structures, Expanded memory, a raised enemy budget and the " +
+                      "randomizer's gate and key safety: keys, gates, level columns and the level-finishing groups are never touched.", 56, 102, 950, 44, Text2, 15f);
+        Text2Label(p, "Seed", 28, 152, 60, 30, Text1, 17f);
+        rndSeed.Text = Randomizer.Seed > 0 ? Randomizer.Seed.ToString() : "";
+        rndSeed.Bounds = R(new Rectangle(92, 150, 150, 30));
+        rndSeed.Font = new Font("Segoe UI", 16f * scale, GraphicsUnit.Pixel);
+        rndSeed.MaxLength = 9;
+        rndSeed.TextChanged += delegate
+        {
+            int n;
+            Randomizer.Seed = int.TryParse(rndSeed.Text.Trim(), out n) && n > 0 ? n : 0;
+            Picture.Save();
+        };
+        p.Controls.Add(rndSeed);
+        tips.SetToolTip(rndSeed, "The same seed and switches always make the same game. Empty: a new seed on the next Play.");
+        Action2(p, rndNewSeed, "New seed", 256, 148, 140, delegate { rndSeed.Text = Randomizer.NewSeed().ToString(); });
+        Tick(p, rndEnemies, "Enemies", Randomizer.Enemies, 28, 194, 300, delegate { Randomizer.Enemies = rndEnemies.Checked; RefreshRandomizer(); Picture.Save(); });
+        Tick(p, rndStructures, "Structures", Randomizer.Structures, 360, 194, 300, delegate { Randomizer.Structures = rndStructures.Checked; Picture.Save(); });
+        Tick(p, rndChests, "Chests (and what is in them)", Randomizer.Chests, 660, 194, 340, delegate { Randomizer.Chests = rndChests.Checked; Picture.Save(); });
+        Tick(p, rndItems, "Items", Randomizer.Items, 28, 228, 300, delegate { Randomizer.Items = rndItems.Checked; Picture.Save(); });
+        Tick(p, rndSkills, "Abilities and skills", Randomizer.Skills, 360, 228, 300, delegate { Randomizer.Skills = rndSkills.Checked; Picture.Save(); });
+        Tick(p, rndBossEnemies, "Bosses as normal enemies: a boss can turn up in a level (experimental)", Randomizer.BossesAsEnemies, 56, 266, 940,
+             delegate { Randomizer.BossesAsEnemies = rndBossEnemies.Checked; Picture.Save(); });
+        tips.SetToolTip(rndBossEnemies, "Now and then (2 a level at most) an enemy is swapped for one of the six bosses (the Spawn editor's \"Bosses as enemies\" list).");
+        Tick(p, rndBossArenas, "Randomize boss fights: each boss arena gets another of the six bosses in place of its own (experimental)", Randomizer.BossArenas, 56, 300, 940,
+             delegate { Randomizer.BossArenas = rndBossArenas.Checked; Picture.Save(); });
+        tips.SetToolTip(rndBossArenas, "The arena's own boss is swapped for another boss (picked by the seed, from the Spawn editor's \"Boss arenas\" list); beating it ends the arena as usual.");
+        Action2(p, rndSpawnEditor, "Spawn editor...", 28, 346, 220, delegate
+        {
+            SpawnEditorForm.ShowEditor(this, delegate { RefreshRandomizer(); });
+        });
+        tips.SetToolTip(rndSpawnEditor, "What can appear and how often: enemies, bosses, items, structures, abilities and skills, and what chests hold.");
+        Action2(p, rndBalanced, "Back to the balanced rates", 260, 346, 300, delegate
+        {
+            if (MessageBox.Show(this, "Put the spawn rates back to the launcher's balanced ones?", Build.Name, MessageBoxButtons.YesNo) == DialogResult.Yes)
+                Randomizer.ResetSpawnRates();
+            RefreshRandomizer();
+        });
+        rndState.BackColor = Color.Transparent;
+        rndState.ForeColor = Text2;
+        rndState.Font = new Font("Segoe UI", 15f * scale, GraphicsUnit.Pixel);
+        rndState.Bounds = R(new Rectangle(28, 396, 980, 80));
+        p.Controls.Add(rndState);
+        RefreshRandomizer();
+    }
+
+    void RefreshRandomizer()
+    {
+        foreach (Control c in new Control[] { rndSeed, rndNewSeed, rndEnemies, rndStructures, rndItems, rndSkills, rndChests, rndSpawnEditor, rndBalanced })
+            c.Enabled = Randomizer.Enabled;
+        rndBossEnemies.Enabled = rndBossArenas.Enabled = Randomizer.Enabled && Randomizer.Enemies;
+        rndState.Text = !Randomizer.Enabled
+            ? (Randomizer.Applied ? "Off: the original game files come back on the next Play." : "Off.")
+            : (Randomizer.CustomRates ? "Spawn rates: yours (randomizer_rates.txt)." : "Spawn rates: the balanced ones.") +
+              " Nothing waits at Play: each level is randomized in the game as it loads, the same way every time for the same seed.";
+    }
+
     void BuildPages()
     {
         var tips = new ToolTip();
@@ -476,24 +543,27 @@ class LauncherForm : Form
         if (Picture.FrameRateNames.Length > 1) // (the USA and Japanese releases have only their own 60 Hz)
             Choice(p, frameRate, "Frame rate", Picture.FrameRateNames, Picture.FrameRate, 126, delegate { Picture.FrameRate = frameRate.SelectedIndex; Picture.Save(); });
         Tick(p, softParticles, "Smooth effects", Picture.SoftParticles, 28, 178, 900, delegate { Picture.SoftParticles = softParticles.Checked; Picture.Save(); });
-        Text2Label(p, "Fire, smoke, fairies and sparkles at the full upscaled resolution (not in Original).", 56, 206, 900, 24, Text2);
-        Tick(p, vu1Thread, "Faster 3D: use a second CPU core for the 3D graphics", Picture.Vu1Thread, 28, 222, 900, delegate { Picture.Vu1Thread = vu1Thread.Checked; vu1Pipeline.Enabled = vu1Thread.Checked; Picture.Save(); });
-        Tick(p, vu1Pipeline, "Overlap frames: draw each frame while the game works on the next", Picture.Vu1Pipeline, 56, 256, 870, delegate { Picture.Vu1Pipeline = vu1Pipeline.Checked; Picture.Save(); });
+        Text2Label(p, "Fire, smoke, fairies and sparkles at the full upscaled resolution (not in Original).", 56, 204, 900, 24, Text2);
+        Tick(p, vu1Thread, "Faster 3D: use a second CPU core for the 3D graphics", Picture.Vu1Thread, 28, 230, 900, delegate { Picture.Vu1Thread = vu1Thread.Checked; vu1Pipeline.Enabled = vu1Thread.Checked; Picture.Save(); });
+        Tick(p, vu1Pipeline, "Overlap frames: draw each frame while the game works on the next", Picture.Vu1Pipeline, 56, 262, 870, delegate { Picture.Vu1Pipeline = vu1Pipeline.Checked; Picture.Save(); });
         vu1Pipeline.Enabled = Picture.Vu1Thread;
-        Tick(p, freeCamera, "Free camera: the right stick turns the camera around Maximo (experimental)", Picture.FreeCamera, 28, 290, 960,
+        Tick(p, freeCamera, "Free camera: the right stick turns the camera around Maximo (experimental)", Picture.FreeCamera, 28, 296, 960,
              delegate { Picture.FreeCamera = freeCamera.Checked; RefreshCamera(); Picture.Save(); });
-        Small(p, cameraSpeed, "Speed", Picture.CameraSpeedNames, Picture.CameraSpeed, 56, 326, 70, 170,
+        Small(p, cameraSpeed, "Speed", Picture.CameraSpeedNames, Picture.CameraSpeed, 56, 332, 70, 170,
               delegate { Picture.CameraSpeed = cameraSpeed.SelectedIndex; Picture.Save(); });
-        Small(p, cameraReturn, "Swing back behind Maximo", Picture.CameraReturnNames, Picture.CameraReturn, 330, 326, 230, 200,
+        Small(p, cameraReturn, "Swing back behind Maximo", Picture.CameraReturnNames, Picture.CameraReturn, 330, 332, 230, 200,
               delegate { Picture.CameraReturn = cameraReturn.SelectedIndex; Picture.Save(); });
         tips.SetToolTip(cameraReturn, "How long after you let go of the right stick the camera turns back behind Maximo by itself");
-        Tick(p, cameraInvert, "Invert up/down", Picture.CameraInvertY, 56, 362, 400, delegate { Picture.CameraInvertY = cameraInvert.Checked; Picture.Save(); });
-        Text2Label(p, "R3 (click the right stick) swings it back at once. Keyboard: I J K L turn it, R swings it back (see Controls).", 56, 392, 900, 26, Text2);
+        Tick(p, cameraInvert, "Invert up/down", Picture.CameraInvertY, 56, 366, 400, delegate { Picture.CameraInvertY = cameraInvert.Checked; Picture.Save(); });
+        Text2Label(p, "R3 (click the right stick) swings it back at once. Keyboard: I J K L turn it, R swings it back (see Controls).", 56, 396, 900, 26, Text2);
         RefreshCamera();
-        Tick(p, skipIntro, "Skip the intro: start at the main menu", Picture.SkipIntro, 28, 426, 900, delegate { Picture.SkipIntro = skipIntro.Checked; Picture.Save(); });
+        Tick(p, skipIntro, "Skip the intro: start at the main menu", Picture.SkipIntro, 28, 428, 900, delegate { Picture.SkipIntro = skipIntro.Checked; Picture.Save(); });
         Text2Label(p, "Leaves out the Capcom logos, the copyright notice and the title screen.", 56, 454, 950, 26, Text2);
 
-        p = NewPage(3, "HD Textures");
+        p = NewPage(3, "Randomizer");
+        BuildRandomizerPage(p, tips);
+
+        p = NewPage(4, "HD Textures");
         Tick(p, hdTextures, "Use HD textures", HdTextures.Enabled, 28, 80, 500, delegate { HdTextures.Enabled = hdTextures.Checked; Picture.Save(); });
         Action2(p, hdTexturesButton, "Manage texture packs...", 28, 124, 280, delegate
         {
@@ -503,7 +573,7 @@ class LauncherForm : Form
         Text2Label(p, "Download Marcus' HD texture pack, install other packs, and choose which are used. It also gives the game's HUD its HD look.", 28, 182, 960, 54, Text2, 17f);
         Text2Label(p, "HD textures by Marcus of \"Maximo Capcom Videos\".", 28, 244, 960, 30, Text1, 17f);
 
-        p = NewPage(4, "Game Files");
+        p = NewPage(5, "Game Files");
         Action2(p, setupIso, "Set up from ISO...", 28, 74, 220, delegate { ChooseIso(); });
         Action2(p, setupFolder, "...or from a folder", 258, 74, 220, delegate { ChooseFolder(); });
         Action2(p, openSaves, "Saves", 488, 74, 150, delegate { Open(Paths.MemoryCard); });
@@ -549,14 +619,14 @@ class LauncherForm : Form
         p.Controls.Add(buildLog);
         Action2(p, cancelBuild, "Cancel", 28, 436, 160, delegate { cancelBuild.Enabled = false; buildStage.Text = "Cancelling..."; Builder.Cancel(); });
 
-        p = NewPage(5, "About");
+        p = NewPage(6, "About");
         Text2Label(p, Build.Name, 28, 80, 980, 30, Text1, 19f);
         Text2Label(p, "Version: " + Build.Version, 28, 114, 980, 54, Text2);
         Text2Label(p, "A native PC port of the PAL PlayStation 2 game, made by recompiling the game from your own disc. " +
                       "This project contains no game code or data: you need your own copy of the game.", 28, 182, 980, 60, Text1, 17f);
         Text2Label(p, "This is an unofficial fan project. It is not affiliated with or endorsed by Capcom.", 28, 256, 980, 30, Text1, 17f);
 
-        p = NewPage(6, "Credits");
+        p = NewPage(7, "Credits");
         Text2Label(p, "Biorhythmic Studios", 28, 74, 460, 28, Gold, 20f);
         Text2Label(p, "Native PC port", 500, 76, 500, 28, Text1, 17f);
         Text2Label(p, "Marcus of \"Maximo Capcom Videos\"", 28, 108, 460, 28, Gold, 20f);
@@ -770,7 +840,7 @@ class LauncherForm : Form
         if (building) { ShowPage(BuildPage); return; }
         if (busy) return;
         if (!File.Exists(Paths.Game)) { StartBuild(); return; }
-        if (!DiscUsable()) { ShowPage(4); return; }
+        if (!DiscUsable()) { ShowPage(5); return; }
         int dropIn;
         if (HdTextures.Enabled && HdTextures.DropInChanged(out dropIn))
         {
@@ -794,6 +864,7 @@ class LauncherForm : Form
             status.ForeColor = Text1;
             status.Text = text ?? "Playing. Close the game window to stop.";
         }));
+        Randomizer.OnProgress = CrossWorld.OnProgress;
         RunInBackground(() => { result = Game.Run(86400, audio); BeginInvoke((Action)(() => lastRun.Text = result)); }, null);
     }
 
