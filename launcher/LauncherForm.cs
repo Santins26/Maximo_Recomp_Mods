@@ -105,6 +105,19 @@ class LauncherForm : Form
         RefreshBanner();
         Refresh2();
         ShowPage(-1);
+        Builder.DeleteOldLauncher();
+        // A newer version of the mods on GitHub: said on the status line (asked in the background).
+        new Thread(() =>
+        {
+            bool? newer = Builder.UpdateAvailable();
+            if (newer == true && IsHandleCreated)
+                BeginInvoke((Action)(() =>
+                {
+                    if (building) return;
+                    status.Text = "A new version of the mods is out: open Game Files and press \"Update and rebuild the game\" (only what changed is compiled again).";
+                    status.ForeColor = Gold;
+                }));
+        }) { IsBackground = true }.Start();
         FormClosing += delegate
         {
             if (building) Builder.Cancel();
@@ -754,7 +767,8 @@ class LauncherForm : Form
             }
         }
         string message = "This compiles the game on your PC from your own disc. It downloads the source code and libraries (under 1 GB) " +
-                         "and needs about 4 GB of disk space while it builds. Afterwards only the game (about 60 MB) stays. It can take a while.";
+                         "and needs about 4 GB of disk space. The source folder stays afterwards, so later updates only compile what " +
+                         "changed (a few minutes) instead of the whole game. The first build can take a while.";
         if (Builder.NeedsCppTools)
             message += "\r\n\r\nYour PC also needs Microsoft's free C++ Build Tools, a further download of several GB that needs about 8 GB more. " +
                        "Windows will ask for your permission, and they are covered by Microsoft's licence terms.";
@@ -823,7 +837,7 @@ class LauncherForm : Form
                 building = false;
                 buildBar.Style = ProgressBarStyle.Continuous;
                 buildBar.Value = error == null ? 100 : 0;
-                buildStage.Text = error ?? "Done. Press Play.";
+                buildStage.Text = error ?? (Builder.LauncherUpdated ? "Done. The launcher was updated too: close it and open it again." : "Done. Press Play.");
                 Busy(false);
                 if (error != null && !stopped)
                     MessageBox.Show(this, error, Build.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);

@@ -148,14 +148,27 @@ static class Builder
                 InstallCppTools(output, stage);
             }
 
-            GetSource(git, gitFolder, stage, output);
-            Compile(gitFolder, stage, output);
+            // An update: the source and the earlier build are still here (kept since this version), so only what
+            // changed is compiled again - usually just the mod's own code, a few minutes - instead of the whole game.
+            string oldHead = Directory.Exists(Path.Combine(Source, ".git")) ? GitHead(git, gitFolder) : null;
+            bool incremental = oldHead != null && EarlierBuild() != null;
+            GetSource(git, gitFolder, stage, output, incremental ? oldHead : null);
+            string why = "";
+            if (incremental && CanRebuild(git, gitFolder, oldHead, output, out why))
+            {
+                output("Update: " + why);
+                Rebuild(gitFolder, stage, output);
+            }
+            else
+            {
+                if (incremental)
+                    output("Full build: " + why);
+                Compile(gitFolder, stage, output);
+            }
 
             stage("Installing the game", -1);
             // build.cmd builds a PAL disc into dist, a USA one into dist-usa and a Japanese one into dist-jpn.
-            string region = "PAL";
-            string regionFile = Path.Combine(Source, "build_region.txt");
-            if (File.Exists(regionFile)) region = File.ReadAllText(regionFile).Trim().ToUpperInvariant();
+            string region = Region();
             string built = Path.Combine(Source, (region == "USA" ? "dist-usa" : region == "JPN" ? "dist-jpn" : "dist") + "\\game");
             if (!Directory.Exists(built)) built = Path.Combine(Source, "dist\\game");
             output("Built for the " + region + " release: " + built);
@@ -164,9 +177,9 @@ static class Builder
             foreach (string file in Directory.GetFiles(built))
                 File.Copy(file, Path.Combine(target, Path.GetFileName(file)), true);
             KeepCrossWorldTools(output);
-            stage("Cleaning up", -1);
-            RemoveSource(gitFolder, output);
-            output("Build finished.");
+            UpdateLauncher(Path.GetDirectoryName(built), output);
+            // The source and the build stay (about 3.5 GB): the next update recompiles only what changed.
+            output("Build finished. The source folder is kept so that updates only recompile what changed.");
         }
     }
 
@@ -192,7 +205,7 @@ static class Builder
         }
         else
             output("The source has no maximo1randomizer folder: the cross-world enemies will not be available.");
-        foreach (string tool in new[] { "cross_world_enemies.py", "more_enemies.py" })
+        foreach (string tool in new[] { "cross_world_enemies.py", "more_enemies.py", "randomize_game.py", "spawn_editor.py" })
         {
             string file = Path.Combine(Source, "tools", tool);
             if (!File.Exists(file)) continue;
@@ -269,14 +282,14 @@ static class Builder
     }
 
     // A dropped connection can leave a submodule half made, which git can't continue: after two tries, start clean.
-    static void GetSource(string git, string gitFolder, Action<string, int> stage, Action<string> output)
+    static void GetSource(string git, string gitFolder, Action<string, int> stage, Action<string> output, string oldHead = null)
     {
         const int Attempts = 4, FreshFrom = 3;
         for (int attempt = 1; ; attempt++)
         {
             try
             {
-                FetchSource(git, gitFolder, stage, output);
+                FetchSource(git, gitFolder, stage, output, oldHead);
                 return;
             }
             catch (OperationCanceledException) { throw; }
@@ -290,13 +303,14 @@ static class Builder
             CheckCancelled();
             if (attempt + 1 >= FreshFrom && Directory.Exists(Source))
             {
+                oldHead = null; // (a fresh clone: everything is built again)
                 output("Starting the download again from a clean folder.");
                 RemoveFolder(Source, gitFolder, output);
             }
         }
     }
 
-    static void FetchSource(string git, string gitFolder, Action<string, int> stage, Action<string> output)
+    static void FetchSource(string git, string gitFolder, Action<string, int> stage, Action<string> output, string oldHead)
     {
         const string longPaths = "-c core.longpaths=true "; // SPIRV-Cross test files exceed the Windows limit otherwise
         // Shallow (latest version only, no history): about 0.9 GB less to download and store.
@@ -315,6 +329,15 @@ static class Builder
                  Paths.Root, gitFolder, output);
             Directory.Move(cloning, Source);
         }
+        // An update whose libraries (the submodules) are the same commits: they are left as they are. Resetting them
+        // would rewrite their files - and the runtime header every game file includes - so everything would compile
+        // again. The project's changes to them are put back below, only where they differ.
+        if (oldHead != null && !SubmodulesChanged(git, gitFolder, oldHead))
+        {
+            output("The libraries have not changed: kept as they are.");
+            ApplyOverlay(gitFolder, stage, output);
+            return;
+        }
         stage("Downloading the libraries", -1);
         try
         {
@@ -327,13 +350,171 @@ static class Builder
             output("Shallow download of the libraries failed (" + e.Message + "); downloading the rest in full.");
             Tool(git, longPaths + "submodule update --init --recursive --force", Source, gitFolder, output);
         }
-        // The project's own changes to the runtime and the GS renderer, which the submodules' upstream commits lack.
+        ApplyOverlay(gitFolder, stage, output);
+    }
+
+    // The project's own changes to the runtime and the GS renderer, which the submodules' upstream commits lack (only
+    // files that differ are copied, so unchanged ones keep their dates and are not compiled again).
+    static void ApplyOverlay(string gitFolder, Action<string, int> stage, Action<string> output)
+    {
         string overlay = Path.Combine(Source, "apply_overlay.cmd");
         if (File.Exists(overlay))
         {
             stage("Applying the mod's runtime changes", -1);
             Tool(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", "/d /s /c \"\"" + overlay + "\"\"", Source, gitFolder, output);
         }
+    }
+
+    // ---- updates that only recompile what changed ----
+
+    static string Region()
+    {
+        string regionFile = Path.Combine(Source, "build_region.txt");
+        try { return File.Exists(regionFile) ? File.ReadAllText(regionFile).Trim().ToUpperInvariant() : "PAL"; }
+        catch (IOException) { return "PAL"; }
+    }
+
+    static string Suffix(string region) { return region == "USA" ? "-usa" : region == "JPN" ? "-jpn" : ""; }
+
+    // The build folder of the last full build, if all of it is still here (its compiled game code, the code generated
+    // from the disc, and the game it made).
+    static string EarlierBuild()
+    {
+        string suffix = Suffix(Region());
+        string build = Path.Combine(Source, "build" + suffix);
+        if (!File.Exists(Path.Combine(build, "build.ninja")) || !File.Exists(Path.Combine(build, "maximo_boot.exe")) ||
+            !Directory.Exists(Path.Combine(Source, "generated" + suffix + "\\game")) || !File.Exists(Path.Combine(Source, "rebuild.cmd")))
+            return null;
+        return build;
+    }
+
+    static string GitOutput(string git, string gitFolder, string arguments)
+    {
+        var lines = new StringBuilder();
+        Tool(git, arguments, Source, gitFolder, l => lines.AppendLine(l));
+        return lines.ToString();
+    }
+
+    static string GitHead(string git, string gitFolder)
+    {
+        try
+        {
+            string head = GitOutput(git, gitFolder, "rev-parse HEAD").Trim();
+            return Regex.IsMatch(head, "^[0-9a-f]{40}$") ? head : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return null; }
+    }
+
+    static string[] ChangedFiles(string git, string gitFolder, string oldHead)
+    {
+        return GitOutput(git, gitFolder, "diff --name-only " + oldHead + " HEAD")
+            .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    static bool SubmodulesChanged(string git, string gitFolder, string oldHead)
+    {
+        try
+        {
+            return ChangedFiles(git, gitFolder, oldHead).Any(f => f == ".gitmodules" || f.StartsWith("external/", StringComparison.Ordinal));
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception) { return true; }
+    }
+
+    // A quick rebuild is enough unless the update changed how the game's code is made from the disc: the function
+    // map, the VU1 recipe, the disc tool, the recompiler, or the libraries.
+    static bool CanRebuild(string git, string gitFolder, string oldHead, Action<string> output, out string why)
+    {
+        string[] changed;
+        try { changed = ChangedFiles(git, gitFolder, oldHead); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception e) { why = "could not compare with the earlier version (" + e.Message + ")"; return false; }
+        string[] full = { "data/", "tools/kit/", "external/", ".gitmodules", "runtime_overlay/external/PS2Recomp/ps2xRecomp/", "build.cmd" };
+        string hit = changed.FirstOrDefault(f => full.Any(p => f.StartsWith(p, StringComparison.Ordinal)));
+        if (hit != null)
+        {
+            why = hit + " changed, which needs the whole game made again from your disc";
+            return false;
+        }
+        why = changed.Length == 0 ? "already up to date" : changed.Length + " changed file(s), only those are compiled again";
+        foreach (string f in changed.Take(20))
+            output("  changed: " + f);
+        return true;
+    }
+
+    static void Rebuild(string gitFolder, Action<string, int> stage, Action<string> output)
+    {
+        var ninja = new Regex(@"^\[(\d+)/(\d+)\]");
+        string text = "Updating: compiling what changed";
+        stage(text, -1);
+        Action<string> parse = l =>
+        {
+            Match m = ninja.Match(l);
+            if (m.Success)
+                stage(text, (int)(100L * long.Parse(m.Groups[1].Value) / Math.Max(1L, long.Parse(m.Groups[2].Value))));
+            output(l);
+        };
+        string script = Path.Combine(Source, "rebuild.cmd");
+        Tool(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+             "/d /s /c \"\"" + script + "\" " + Region().ToLowerInvariant() + "\"", Source, gitFolder, parse);
+    }
+
+    // The launcher that came with the update replaces this one. A running program can't be overwritten, but it can be
+    // renamed: this one becomes MaximoLauncher.old.exe (deleted on the next start) and the new one takes its name,
+    // so the next start runs it.
+    static void UpdateLauncher(string distGame, Action<string> output)
+    {
+        try
+        {
+            string fresh = Path.Combine(Path.GetDirectoryName(distGame), "MaximoLauncher.exe");
+            string mine = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            if (!File.Exists(fresh) || string.IsNullOrEmpty(mine))
+                return;
+            if (File.ReadAllBytes(fresh).SequenceEqual(File.ReadAllBytes(mine)))
+                return;
+            string old = Path.Combine(Path.GetDirectoryName(mine), "MaximoLauncher.old.exe");
+            if (File.Exists(old))
+                File.Delete(old);
+            File.Move(mine, old);
+            File.Copy(fresh, mine);
+            LauncherUpdated = true;
+            output("The launcher was updated too: it takes effect the next time you open it.");
+        }
+        catch (Exception e) { output("The launcher could not be updated (" + e.Message + "); the game was."); }
+    }
+    public static bool LauncherUpdated;
+
+    public static void DeleteOldLauncher()
+    {
+        try
+        {
+            string old = Path.Combine(Paths.Root, "MaximoLauncher.old.exe");
+            if (File.Exists(old))
+                File.Delete(old);
+        }
+        catch (Exception) { }
+    }
+
+    // A newer version of the mods on GitHub than the one this game was built from (asked in the background; null
+    // when it can't tell: no kept source, no Git, no connection).
+    public static bool? UpdateAvailable()
+    {
+        try
+        {
+            if (!Directory.Exists(Path.Combine(Source, ".git")))
+                return null;
+            string git = SystemGit() ?? Path.Combine(OwnGit, "cmd\\git.exe");
+            if (!File.Exists(git))
+                return null;
+            string gitFolder = Path.GetDirectoryName(git);
+            string local = GitHead(git, gitFolder);
+            string remote = GitOutput(git, gitFolder, "ls-remote origin refs/heads/main").Split('\t')[0].Trim();
+            if (local == null || !Regex.IsMatch(remote, "^[0-9a-f]{40}$"))
+                return null;
+            return local != remote;
+        }
+        catch (Exception) { return null; }
     }
 
     // Everything in .\source is only needed while building (the next build downloads it again), so it goes once the
