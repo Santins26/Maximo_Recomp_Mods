@@ -4505,6 +4505,7 @@ namespace
         double seconds = 0.0;
         uint32_t clockLast = 0;
         bool clockValid = false;
+        std::vector<uint32_t> bossesSeen; // boss types of this run's boss waves, in order (each boss before a repeat)
     } g_survival;
     constexpr float kSurvivalHudSize = 0.75f; // survival's lines on screen, against the debug menu's letters
 
@@ -8430,6 +8431,7 @@ namespace
             g_survival.seconds = 0.0;
         g_survival.clockValid = false;
         g_survival.wave = 0;
+        g_survival.bossesSeen.clear();
         g_survival.kills = 0;
         g_survival.foes.clear();
         g_survival.trail.clear();
@@ -8576,7 +8578,29 @@ namespace
         {
             const bool boss = bossWave && n == count;
             const std::vector<Pick> &pool = boss || ordinary.empty() ? bosses : ordinary;
-            const Pick p = pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng)];
+            Pick p = pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng)];
+            if (boss)
+            {
+                // Every loaded boss once before any comes back, and never the same one twice in a row: the boss
+                // waves went through the six in a random order (with one picked at random each time, an arena
+                // could show its own boss wave after wave).
+                std::vector<Pick> fresh;
+                const size_t round = g_survival.bossesSeen.size() % bosses.size();
+                const auto roundStart = g_survival.bossesSeen.end() - static_cast<std::ptrdiff_t>(round);
+                for (const Pick &b : bosses)
+                    if (std::find(roundStart, g_survival.bossesSeen.end(), kEnemyTypes[b.index].id) ==
+                            g_survival.bossesSeen.end() &&
+                        (bosses.size() == 1 || g_survival.bossesSeen.empty() ||
+                         g_survival.bossesSeen.back() != kEnemyTypes[b.index].id))
+                        fresh.push_back(b);
+                if (!fresh.empty())
+                    p = fresh[std::uniform_int_distribution<size_t>(0, fresh.size() - 1)(rng)];
+                g_survival.bossesSeen.push_back(kEnemyTypes[p.index].id);
+                if (bosses.size() == 1)
+                    logf("debug: survival: only one boss class is loaded here (%s): the cross-world files are not in "
+                         "place (the launcher needs Python 3 for them), so every boss wave is this boss",
+                         kEnemyTypes[p.index].name);
+            }
             // At one of the arena's sides (above), a little scattered; a ring around Maximo only while there is no
             // walked spot at all.
             float pos[3];
