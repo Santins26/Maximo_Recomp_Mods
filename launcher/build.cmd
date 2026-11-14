@@ -10,6 +10,6 @@ if "%MAXIMO_LAUNCHER_DEV%"=="1" set DEFINES=/define:DEV_SWITCHES
 "%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:winexe /optimize+ /platform:x64 %DEFINES% /win32icon:"%~dp0maximo.ico" ^
   /out:"%OUT%\MaximoLauncher.exe" ^
   /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ^
-  "%~dp0MaximoLauncher.cs" "%~dp0LauncherForm.cs" "%~dp0GameArt.cs" "%~dp0HdTextures.cs" "%~dp0Builder.cs" "%~dp0Controls.cs" "%~dp0MoreEnemies.cs" "%~dp0CrossWorld.cs" "%~dp0BuildGame.cs" "%~dp0DiscImage.cs"
+  "%~dp0MaximoLauncher.cs" "%~dp0LauncherForm.cs" "%~dp0GameArt.cs" "%~dp0HdTextures.cs" "%~dp0Builder.cs" "%~dp0Controls.cs" "%~dp0MoreEnemies.cs" "%~dp0CrossWorld.cs" "%~dp0BuildGame.cs" "%~dp0DiscImage.cs" "%~dp0Randomizer.cs" "%~dp0SpawnEditorForm.cs"
 if errorlevel 1 exit /b 1
 xcopy /y /q /i "%~dp0art\*.png" "%OUT%\art" >nul

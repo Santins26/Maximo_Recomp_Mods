@@ -192,6 +192,7 @@ static class Picture
                     CameraReturn = Array.IndexOf(CameraReturnValues, n);
                 if (kv[0].Trim() == "camerainvert") CameraInvertY = kv[1].Trim() == "1";
                 HdTextures.Load(kv[0].Trim(), kv[1].Trim());
+                Randomizer.Load(kv[0].Trim(), kv[1].Trim());
             }
         }
         catch (IOException) { }
@@ -215,7 +216,7 @@ static class Picture
                                         "\r\ncamera=" + (FreeCamera ? 1 : 0) +
                                         "\r\ncameraspeed=" + CameraSpeedValues[CameraSpeed] +
                                         "\r\ncamerareturn=" + CameraReturnValues[CameraReturn] +
-                                        "\r\ncamerainvert=" + (CameraInvertY ? 1 : 0) + "\r\n" + HdTextures.SaveLines()); }
+                                        "\r\ncamerainvert=" + (CameraInvertY ? 1 : 0) + "\r\n" + HdTextures.SaveLines() + Randomizer.SaveLines()); }
         catch (IOException) { }
     }
 
@@ -230,7 +231,7 @@ static class Picture
                 (Memory == 1 || Enemies > 0 || CrossWorld ? ", 128 MB memory" : "") +
                (FreeCamera ? ", free camera (" + CameraSpeedNames[CameraSpeed].ToLowerInvariant() + ", back " +
                              (CameraReturnValues[CameraReturn] == 0 ? "never" : "after " + CameraReturnValues[CameraReturn] + " s") +
-                             (CameraInvertY ? ", inverted" : "") + ")" : "") + HdTextures.Describe();
+                             (CameraInvertY ? ", inverted" : "") + ")" : "") + Randomizer.Describe() + HdTextures.Describe();
     }
 
     // The settings of the developer's play_enhanced.cmd; a value already in the environment wins.
@@ -273,18 +274,20 @@ static class Picture
         // Extra enemies only show up if the object limit lets them run, so it is raised with them.
         // The budget is per type and the original is 100, so it follows the enemy multiplier with room to spare
         // (triple enemies -> 400). Maximum is the recomp's ceiling, 1000.
-        if ((ObjectBudget > 0 || Enemies > 0) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_OBJECT_BUDGET")))
+        if ((ObjectBudget > 0 || Enemies > 0 || Randomizer.Enabled) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_OBJECT_BUDGET")))
         {
-            int budget = ObjectBudget == 2 ? 1000 : 200;
+            int budget = ObjectBudget == 2 ? 1000 : Randomizer.Enabled ? Randomizer.ObjectBudget : 200;
             budget = Math.Max(budget, Math.Min(1000, (int)Math.Ceiling(100.0 * (MoreEnemies.Multipliers[Enemies] + 1.0))));
             info.EnvironmentVariables["MAXIMO_OBJECT_BUDGET"] = budget.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
         // Extra enemies need memory for their models and AI; the PS2's 32 MB runs out first (10x crashed the intro).
         // Cross-world enemies with every sound: the sound banks need more than the PS2's 2 MB of SPU2 sound RAM.
-        if (CrossWorld && global::CrossWorld.SoundRamMb > 2 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2X_SPU2_RAM_MB")))
+        if ((CrossWorld || Randomizer.Enabled) && global::CrossWorld.SoundRamMb > 2 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PS2X_SPU2_RAM_MB")))
             info.EnvironmentVariables["PS2X_SPU2_RAM_MB"] = global::CrossWorld.SoundRamMb.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        if ((Memory == 1 || Enemies > 0 || CrossWorld) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_RAM")))
+        if ((Memory == 1 || Enemies > 0 || CrossWorld || Randomizer.Enabled) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_RAM")))
             info.EnvironmentVariables["MAXIMO_RAM"] = "more";
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_RANDOMIZER")))
+            Randomizer.Apply(info);
         string packs = HdTextures.PackList();
         if (packs.Length > 0 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("MAXIMO_HDTEX_PACKS")))
             info.EnvironmentVariables["MAXIMO_HDTEX_PACKS"] = packs;
@@ -435,6 +438,7 @@ static class Setup
             Directory.Move(temp, Paths.Disc);
             MoreEnemies.ForgetBackup(); // the new files are the originals now
             CrossWorld.ForgetBackup();
+            Randomizer.ForgetBackup();
             File.WriteAllText(Path.Combine(Paths.Root, "disc_region.txt"), region); // (Build.Region before a build)
             Log.Write("disc release: " + Build.TitleOf(region));
             string why;
@@ -494,15 +498,19 @@ static class Game
         {
             Log.Write("enemies: could not prepare the level files: " + e.Message);
         }
-        // Cross-world enemies: port them into the world files in .\disc (or put the originals back).
+        // Randomizer (Randomizer.cs) or the debug menu's cross-world enemies (CrossWorld.cs): both start from the original
+        // world files, so the one that is off puts them back first. The randomizer brings its own cross-world enemies.
         try
         {
-            string crossNote = CrossWorld.Prepare(Picture.CrossWorld);
+            // (the randomizer runs inside the game; it needs every class in every world: the cross-world files)
+            string rndNote = Randomizer.Prepare();
+            if (rndNote.Length > 0) Log.Write(rndNote);
+            string crossNote = CrossWorld.Prepare(Picture.CrossWorld || Randomizer.Enabled);
             if (crossNote.Length > 0) Log.Write(crossNote);
         }
         catch (Exception e)
         {
-            Log.Write("cross-world: could not prepare the world files: " + e.Message);
+            Log.Write("cross-world/randomizer: could not prepare the world files: " + e.Message);
         }
 
         var info = new ProcessStartInfo(Paths.Game,
