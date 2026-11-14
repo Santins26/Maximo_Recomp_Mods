@@ -482,6 +482,8 @@ static class Game
     }
 
     // Starts the game and waits for it to end. Returns a one-line summary from its log.
+    public static Action<string> OnWarning; // a problem the player should see (the launcher shows it)
+
     public static string Run(double seconds, bool recordAudio)
     {
         PruneSessions();
@@ -507,6 +509,12 @@ static class Game
             if (rndNote.Length > 0) Log.Write(rndNote);
             string crossNote = CrossWorld.Prepare(Picture.CrossWorld || Randomizer.Enabled);
             if (crossNote.Length > 0) Log.Write(crossNote);
+            // Without them every world has only its own enemies and bosses (survival's boss waves are all the arena's
+            // boss, the randomizer finds little to pick): said on screen, not only in the log.
+            if (crossNote.Contains("was not found") && OnWarning != null)
+                OnWarning("The cross-world enemies could not be added, so each world only has its own enemies and " +
+                          "bosses (survival's boss waves, bosses as enemies and the randomizer need them).\r\n\r\n" +
+                          crossNote.Substring(crossNote.IndexOf(':') + 1).Trim() + ".");
         }
         catch (Exception e)
         {

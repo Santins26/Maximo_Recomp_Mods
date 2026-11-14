@@ -865,6 +865,8 @@ class LauncherForm : Form
             status.Text = text ?? "Playing. Close the game window to stop.";
         }));
         Randomizer.OnProgress = CrossWorld.OnProgress;
+        Game.OnWarning = text => BeginInvoke((Action)(() =>
+            MessageBox.Show(this, text, Build.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning)));
         RunInBackground(() => { result = Game.Run(86400, audio); BeginInvoke((Action)(() => lastRun.Text = result)); }, null);
     }
 
