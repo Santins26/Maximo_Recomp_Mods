@@ -6793,17 +6793,73 @@ namespace
     // second is what made spawns vanish. It skips both for an object whose VM state (func_00103030(vm, handle),
     // asked from 0x1831D4) is 1, so for a spawned object that call answers 1 there.
     constexpr uint32_t kObjectStateFn = GA(0x00103030u), kObjectStateDistanceRa = GA(0x001831DCu);
+    // Where the game measures wake distances from: the cutscene eye, else the game camera (see spawnWakeTick).
+    bool wakeViewer(float vp[3], float &range)
+    {
+        auto inRam = [](uint32_t a) { return a != 0 && (a & PS2_RAM_MASK) == a; };
+        uint32_t viewer = 0;
+        if (rd32(GA(0x00239AD8u)) == 9u)
+            viewer = GA(0x00239A30u);
+        else
+        {
+            const uint32_t cam = rd32(GA(0x00263540u));
+            const uint32_t camObj = inRam(cam) ? rd32(cam) : 0u;
+            if (inRam(camObj))
+                viewer = camObj + 0xA0u;
+        }
+        if (!viewer)
+            return false;
+        std::memcpy(&range, mem(GA(0x0025B9FCu)), 4);
+        std::memcpy(vp, mem(viewer), 12);
+        return std::isfinite(range) && range > 0.0f;
+    }
+    // A spawn's squared distance to the viewer (its body's place), or -1 when it has no body.
+    float spawnViewerDistance2(uint32_t obj, const float vp[3])
+    {
+        const uint32_t w = rd32(obj + 0xB8u);
+        const uint32_t body = w && (w & PS2_RAM_MASK) == w ? rd32(w) : 0u;
+        if (!body || (body & PS2_RAM_MASK) != body)
+            return -1.0f;
+        float p[3];
+        std::memcpy(p, mem(body + 0xA0u), 12);
+        const float dx = p[0] - vp[0], dy = p[1] - vp[1], dz = p[2] - vp[2];
+        return dx * dx + dy * dy + dz * dz;
+    }
     void objectStateEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
-        // Only bosses (the menu's, and survival's arena) are kept awake; every other spawn sleeps and wakes at the
-        // game's own distances, as a level object does (it carries the placed mark, see spawnOne).
+        // Bosses (the menu's, and survival's arena) are kept awake. Every other spawn sleeps and wakes at the game's
+        // own distances, as a level object does (it carries the placed mark, see spawnOne) - but the game's sleep
+        // test and spawnWakeTick's wake test do not measure alike: a spawn near the edge was put to sleep and woken
+        // again every few frames (about a hundred wake-ups a second with the randomizer on), each one a reset of
+        // the object and a hitch. So a spawn stays awake until it is a fifth beyond the wake range: one test
+        // with a margin on each side.
         const uint32_t handle = reg(ctx, 5);
-        if (reg(ctx, 31) == kObjectStateDistanceRa && isSpawnedHandle(handle) &&
-            (g_survival.active || std::any_of(g_debugBosses.begin(), g_debugBosses.end(),
-                                              [&](const DebugBoss &b) { return b.handle == handle && !b.natural; })))
+        if (reg(ctx, 31) == kObjectStateDistanceRa)
         {
-            ret(ctx, 1); // stays in the world
-            return;
+            uint32_t obj = 0;
+            for (const SpawnedObject &o : g_spawnedObjects)
+                if (o.handle == handle && rd32(o.obj) == handle)
+                {
+                    obj = o.obj;
+                    break;
+                }
+            if (obj)
+            {
+                bool awake = g_survival.active ||
+                             std::any_of(g_debugBosses.begin(), g_debugBosses.end(),
+                                         [&](const DebugBoss &b) { return b.handle == handle && !b.natural; });
+                float vp[3], range = 0.0f;
+                if (!awake && wakeViewer(vp, range))
+                {
+                    const float d2 = spawnViewerDistance2(obj, vp);
+                    awake = d2 >= 0.0f && d2 < range * range * 1.44f; // 1.2 x the wake range
+                }
+                if (awake)
+                {
+                    ret(ctx, 1); // stays in the world
+                    return;
+                }
+            }
         }
         g_original[slotOf(ctx->pc)](rdram, ctx, runtime);
     }
