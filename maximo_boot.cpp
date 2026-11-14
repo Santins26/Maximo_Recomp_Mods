@@ -4506,6 +4506,10 @@ namespace
         uint32_t clockLast = 0;
         bool clockValid = false;
         std::vector<uint32_t> bossesSeen; // boss types of this run's boss waves, in order (each boss before a repeat)
+        // Variety: the ordinary kinds are dealt from a shuffled deck (every kind loaded here once before any comes
+        // back), and each kind's classes from a deck of their own (class 1, 2, 3 each before a repeat).
+        std::vector<uint32_t> kindDeck;
+        std::map<uint32_t, std::vector<int>> classDeck;
     } g_survival;
     constexpr float kSurvivalHudSize = 0.75f; // survival's lines on screen, against the debug menu's letters
 
@@ -8432,6 +8436,8 @@ namespace
         g_survival.clockValid = false;
         g_survival.wave = 0;
         g_survival.bossesSeen.clear();
+        g_survival.kindDeck.clear();
+        g_survival.classDeck.clear();
         g_survival.kills = 0;
         g_survival.foes.clear();
         g_survival.trail.clear();
@@ -8466,6 +8472,7 @@ namespace
              g_survival.lives, g_survival.best);
     }
 
+    int g_survivalLookupMisses = 0; // wave spawns in a row that found no enemy class
     // extra > 0: that many replacements for enemies that died by themselves (same wave, no boss).
     void survivalSpawnWave(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, int extra = 0)
     {
@@ -8490,10 +8497,39 @@ namespace
             if (callGuest(rdram, ctx, runtime, kClassLookupFn, vm + 0xB8u, kEnemyTypes[i].id, 0, tmpl) && tmpl)
                 (boss ? bosses : ordinary).push_back({i, tmpl});
         }
+        if (ordinary.empty() && bosses.empty() && !g_survival.badTypes.empty())
+        {
+            // Every kind here was left out (spawns that died by themselves or never moved): forgiven, all back in.
+            logf("debug: survival: every enemy kind here was left out; all of them allowed again");
+            g_survival.badTypes.clear();
+            survivalSpawnWave(rdram, ctx, runtime, extra);
+            return;
+        }
         if (ordinary.empty() && bosses.empty())
         {
+            // The class lookup found nothing: the level may be between states (a load, a reset). Tried again every
+            // 2 seconds; the run ends only after 10 tries in a row.
+            int &misses = g_survivalLookupMisses;
+            if (++misses < 10 && extra == 0)
+            {
+                logf("debug: survival: no enemy class found (try %d), trying again", misses);
+                g_survival.nextWaveAt = g_dbg.padFrames + 120u;
+                return;
+            }
+            if (extra > 0)
+                return;
+            misses = 0;
             survivalEnd("NO ENEMIES LOADED HERE");
             return;
+        }
+        g_survivalLookupMisses = 0;
+        if (extra == 0)
+        {
+            std::string kinds;
+            for (const Pick &o : ordinary)
+                kinds += std::string(kinds.empty() ? "" : ", ") + kEnemyTypes[o.index].name;
+            logf("debug: survival: kinds loaded here (%s): %s", g_survival.levelMode ? "this level" : "arena",
+                 kinds.empty() ? "none" : kinds.c_str());
         }
         if (extra > 0 && ordinary.empty())
             return;
@@ -8579,6 +8615,36 @@ namespace
             const bool boss = bossWave && n == count;
             const std::vector<Pick> &pool = boss || ordinary.empty() ? bosses : ordinary;
             Pick p = pool[std::uniform_int_distribution<size_t>(0, pool.size() - 1)(rng)];
+            if (!boss && !ordinary.empty())
+            {
+                // The next kind from the deck (refilled and shuffled when it runs out; a kind no longer loaded or
+                // left out is skipped). Picking at random each time showed the same two or three kinds wave after
+                // wave and left others out for a whole run.
+                for (int guard = 0; guard < 2; ++guard)
+                {
+                    if (g_survival.kindDeck.empty())
+                    {
+                        for (const Pick &o : ordinary)
+                            g_survival.kindDeck.push_back(kEnemyTypes[o.index].id);
+                        std::shuffle(g_survival.kindDeck.begin(), g_survival.kindDeck.end(), rng);
+                    }
+                    bool found = false;
+                    while (!g_survival.kindDeck.empty() && !found)
+                    {
+                        const uint32_t want = g_survival.kindDeck.back();
+                        g_survival.kindDeck.pop_back();
+                        for (const Pick &o : ordinary)
+                            if (kEnemyTypes[o.index].id == want)
+                            {
+                                p = o;
+                                found = true;
+                                break;
+                            }
+                    }
+                    if (found)
+                        break;
+                }
+            }
             if (boss)
             {
                 // Every loaded boss once before any comes back, and never the same one twice in a row: the boss
@@ -8626,8 +8692,21 @@ namespace
             for (const EnemyClassInfo &c : kEnemyClasses)
                 if (c.id == kEnemyTypes[p.index].id)
                 {
+                    // Every class of the kind comes up: dealt from its own deck (waves 1-2 without class 3, as
+                    // before; class 1 stays in later on too - leaving it out from wave 6 meant the plain skeletons
+                    // and zombies were never seen again).
+                    (void)minTier;
                     const int top = std::min(maxTier, c.count);
-                    const int tier = std::uniform_int_distribution<int>(std::min(minTier, top), top)(rng);
+                    std::vector<int> &deck = g_survival.classDeck[c.id];
+                    deck.erase(std::remove_if(deck.begin(), deck.end(), [top](int t) { return t > top; }), deck.end());
+                    if (deck.empty())
+                    {
+                        for (int t = 1; t <= top; ++t)
+                            deck.push_back(t);
+                        std::shuffle(deck.begin(), deck.end(), rng);
+                    }
+                    const int tier = deck.back();
+                    deck.pop_back();
                     classProp = {c.propType, 0u, c.values[tier - 1]};
                     classPtr = &classProp;
                 }
@@ -10427,8 +10506,41 @@ namespace
             return;
         }
         g_survival.lives = lives;
-        if (g_dbg.menuOpen)
-            return; // nothing happens while the menu is open
+        // Nothing happens while the game stands still - the debug menu open, PAUSE GAME IN FREE CAMERA, or the game's
+        // own pause screen (its frame counter held) - and the run's clocks wait with it: the enemies did not move
+        // while paused, so the "never moved" check took them for asleep, replaced them and left their kinds out;
+        // after a few of those no kind was left and the run ended with "NO ENEMIES LOADED HERE".
+        {
+            static uint32_t lastGameFrame = 0;
+            static int held = 0;
+            static uint64_t pausedSince = 0;
+            const uint32_t gf = rd32(kGameFrameCounterAddr);
+            held = gf == lastGameFrame ? held + 1 : 0;
+            lastGameFrame = gf;
+            const bool paused = g_dbg.menuOpen || (g_dbg.freeCam && g_dbg.pauseInFreeCam) || held >= 3;
+            if (paused)
+            {
+                if (!pausedSince)
+                    pausedSince = g_dbg.padFrames;
+                return;
+            }
+            if (pausedSince)
+            {
+                const uint64_t d = g_dbg.padFrames - pausedSince;
+                pausedSince = 0;
+                for (SurvivalFoe &f : g_survival.foes)
+                {
+                    f.born += d;
+                    f.lastMove += d;
+                }
+                g_survival.lastProgress += d;
+                g_survival.waveStarted += d;
+                g_survival.phaseFrame += d;
+                if (g_survival.nextWaveAt)
+                    g_survival.nextWaveAt += d;
+                g_survival.ringCheckAt += static_cast<uint32_t>(d);
+            }
+        }
         // Where each foe is (its drop falls there), every 6 frames.
         if (g_dbg.padFrames % 6u == 0u)
             for (SurvivalFoe &f : g_survival.foes)
