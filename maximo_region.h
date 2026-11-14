@@ -105,6 +105,8 @@ namespace maximo_region
         {0x120768u, 0x146A90u}, // aligned
         {0x120770u, 0x146A98u}, // aligned
         {0x120EB0u, 0x1471D0u}, // start
+        {0x120ED0u, 0x1471F0u}, // start (mglGotoNextLevel; randomizer boss arenas)
+        {0x11FD30u, 0x146420u}, // start (CheckSubLevelCompleted; randomizer hub phases)
         {0x1212E0u, 0x147600u}, // start
         {0x121510u, 0x147830u}, // start
         {0x1221F0u, 0x148510u}, // start
@@ -440,6 +442,8 @@ namespace maximo_region
         {0x120768u, 0x146B90u}, // aligned
         {0x120770u, 0x146B98u}, // aligned
         {0x120EB0u, 0x1472D0u}, // start
+        {0x120ED0u, 0x1472F0u}, // start (mglGotoNextLevel; randomizer boss arenas)
+        {0x11FD30u, 0x146520u}, // start (CheckSubLevelCompleted; randomizer hub phases)
         {0x1212E0u, 0x147700u}, // start
         {0x121510u, 0x147930u}, // start
         {0x1221F0u, 0x148610u}, // start

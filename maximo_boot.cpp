@@ -5624,6 +5624,18 @@ namespace
         }
     }
 
+    // A hub enemy's phase property (the sub-level it waits for, hidden until it is completed: its script's
+    // CheckSubLevelCompleted), per class, measured in the hubs' P<n>_ records. ~0u: none.
+    uint32_t phasePropIndex(uint32_t cls)
+    {
+        static const std::pair<uint32_t, uint32_t> kPhaseProp[] = {
+            {0x39u, 5u}, {0x54u, 4u}, {0x49u, 4u}, {0x2Fu, 5u}, {0x47u, 5u}, {0x53u, 5u}, {0x58u, 3u},
+            {0x48u, 5u}, {0x3Au, 5u}, {0x0Du, 4u}, {0x19u, 4u}, {0x27u, 5u}, {0x13u, 4u}};
+        for (const auto &[c, index] : kPhaseProp)
+            if (c == cls)
+                return index;
+        return ~0u;
+    }
     uint32_t objectForHandle(uint32_t handle);
     uint32_t spawnOne(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t vm, uint32_t tmpl,
                       const float pos[3], uint32_t scratch, std::string &why, const std::vector<RecordProp> *recordProps,
@@ -6739,8 +6751,12 @@ namespace
         uint32_t obj, handle;
         uint64_t born;
         uint64_t removeAt; // 0 until it dies
+        bool natural = false; // the randomizer's (a boss in place of a level's enemy): sleeps and wakes like one
     };
     std::vector<DebugBoss> g_debugBosses;
+    bool g_spawnSkipIntro = false; // spawnOne: the boss made skips its intro cutscene (the randomizer)
+    // A randomizer boss counts as in a fight (its death may freeze Maximo) only while it is near him.
+    bool debugBossFighting(const DebugBoss &b);
 
     // Diagnostics for GraveDigger in survival (he could not be stunned): his script stuns him (state 12) when a hit
     // of Maximo's (event 2) lands while he is in state 11 with his member 0x17 set. Each event he gets is logged with
@@ -6784,7 +6800,7 @@ namespace
         const uint32_t handle = reg(ctx, 5);
         if (reg(ctx, 31) == kObjectStateDistanceRa && isSpawnedHandle(handle) &&
             (g_survival.active || std::any_of(g_debugBosses.begin(), g_debugBosses.end(),
-                                              [&](const DebugBoss &b) { return b.handle == handle; })))
+                                              [&](const DebugBoss &b) { return b.handle == handle && !b.natural; })))
         {
             ret(ctx, 1); // stays in the world
             return;
@@ -6966,12 +6982,24 @@ namespace
         // caller gives the properties a level record would.
         uint32_t other = 0;
         // The object table (func_00104780): +0 next handle, +4 count, +8 list head, linked through obj+0xBC.
+        // (One waiting for a later hub phase is copied only when there is no other: the copy would wait too.)
         if (!recordProps)
         {
+            const uint32_t phaseIndex = phasePropIndex(inRam(tmpl) ? rd32(tmpl) : 0u);
+            uint32_t waiting = 0;
             uint32_t o = rd32(vm + 0x9Cu + 8u);
             for (int guard = 0; inRam(o) && guard < 20000; ++guard, o = rd32(o + 0xBCu))
                 if (o != obj && rd32(o + 0xB4u) == tmpl)
-                    other = o;
+                {
+                    bool phased = false;
+                    const uint32_t p = rd32(o + 0xF8u), n = rd32(o + 0xFCu);
+                    for (uint32_t k = 0; phaseIndex != ~0u && inRam(p) && n < 256u && k < n; ++k)
+                        if (rd32(p + k * 32u + 4u) == phaseIndex && rd32(p + k * 32u + 8u) != 0u)
+                            phased = true;
+                    (phased ? waiting : other) = o;
+                }
+            if (!other)
+                other = waiting;
         }
         const uint32_t varBytes = rd32(tmpl + 4u), vars = rd32(obj + 0x84u);
         const bool copyVars = other && varBytes && varBytes < 0x10000u && inRam(vars) && inRam(rd32(other + 0x84u));
@@ -7072,6 +7100,11 @@ namespace
                 for (uint32_t slot = 0; slot < 4 && inRam(table); ++slot)
                     *mem(table + slot * 0x180u + handleNow + 3u) = 0;
                 *mem(GA(0x0025AF14u) + 0x180u + handleNow + 3u) = 0;
+                // The randomizer's bosses skip their intro: every boss script plays its intro cutscene (and its
+                // camera, with Maximo hidden) only while its apparition byte 3 is 0, then saves 1 there
+                // (CutScene_Start ... SaveApparitionData(3, 1)): it is 1 from the start.
+                if (g_spawnSkipIntro && inRam(table))
+                    *mem(table + 3u * 0x180u + handleNow + 3u) = 1;
             }
         }
         uint32_t active = 0;
@@ -7967,11 +8000,12 @@ namespace
             if (g_debugBosses.size() != before &&
                 std::none_of(g_debugBosses.begin(), g_debugBosses.end(), [](const DebugBoss &o) { return o.removeAt == 0u; }))
                 g_bossBarCleanup = true;
-            if ((!g_debugBosses.empty() || g_survival.active) && rd32(kPlayerControlFlag) == 0u)
+            if ((std::any_of(g_debugBosses.begin(), g_debugBosses.end(), debugBossFighting) || g_survival.active) &&
+                rd32(kPlayerControlFlag) == 0u)
             {
                 wr32(kPlayerControlFlag, 1u);
                 for (DebugBoss &b : g_debugBosses)
-                    if (b.removeAt == 0u && g_dbg.padFrames - b.born >= 60u)
+                    if (b.removeAt == 0u && g_dbg.padFrames - b.born >= 60u && debugBossFighting(b))
                     {
                         b.removeAt = g_dbg.padFrames + 180u;
                         logf("debug: debug boss (object 0x%07X) died: controls kept on, removal in 3 s", b.obj);
@@ -9108,6 +9142,852 @@ namespace
              played ? "ok" : "FAILED", before, rd32(kSoundQueueCount));
     }
 
+    // ---------------------------------------------------------------------------------------------------------------
+    // RANDOMIZER (the launcher's Randomizer page): done in the game itself with the debug menu's spawn machinery, not
+    // by rewriting the disc. When a level has loaded, its placed enemies, items and structures are each swapped for a
+    // pick from the spawn rates (the same seed always gives the same level), ability pickups and wooden chests get new
+    // contents in place, and a boss arena's boss is swapped for another boss (whose death ends the arena). The cross-world tool (always on with it) has
+    // every class loaded in every world, so anything can be picked anywhere.
+    // Safety, after the randomizer's own rules (maximo1randomizer items.py): nothing is touched that a level's
+    // progression hangs on - gates, keys, level columns, the collector, locked chests, hazards, scripted props, and
+    // every object of a progression group (the level-finisher groups end1, end2..., any group holding a gold key,
+    // skeleton key, level column or monster generator, the hub's phase groups P1_..FP4_, and the "key1" chest). The
+    // groups are the level file's instance names: the .PSX on the disc is read for them and matched to the objects
+    // by type and position. A chest that gives a key or the level-finishing coin keeps its contents.
+    // Settings: MAXIMO_RANDOMIZER=1, MAXIMO_RND_SEED, MAXIMO_RND_OPTIONS (enemies, structures, items, skills, chests,
+    // bossenemies, bossarenas, comma-separated), MAXIMO_RND_RATES (the spawn editor's file: "category id weight").
+    struct RndRate
+    {
+        uint32_t id;
+        int weight;
+    };
+    struct RndChestPrize
+    {
+        const char *name;
+        int prop; // the chest property set to 1 (-1: gold only, -2: mimic)
+        int weight;
+    };
+    struct Randomizer
+    {
+        bool on = false;
+        uint64_t seed = 0;
+        bool enemies = true, structures = true, items = true, skills = true, chests = true;
+        bool bossEnemies = false, bossArenas = false;
+        std::vector<RndRate> enemy, boss, arena, item, structure, skill;
+        std::vector<RndChestPrize> chest;
+        // per level
+        bool armed = true;
+        uint64_t readyAt = 0;
+        // the boss arena's swap
+        int arenaPhase = 0; // 0 none, 1 the stand-in fights, 2 it died (the level ends soon), 3 done
+        uint32_t nativeObj = 0, nativeHandle = 0, nativeType = 0, standInHandle = 0, standInType = 0;
+        float arenaPos[3] = {0.0f, 0.0f, 0.0f};
+        uint64_t arenaDeadAt = 0, arenaRedoAt = 0;
+        uint32_t lives = 0;
+    } g_rnd;
+
+    void randomizerDefaults()
+    {
+        g_rnd.enemy.clear();
+        for (int i = 0; i < kOrdinaryEnemyCount; ++i)
+        {
+            const uint32_t id = kEnemyTypes[i].id;
+            // Fewer of the floaters, the ravens and the over-common guard. (The axe guard, which cannot be killed,
+            // and the raven are never put in a group that may have to be cleared: see randomizeLevel.)
+            const int w = id == 0x6Bu ? 9 : id == 0x37u || id == 0x54u || id == 0x6Au ? 6 : id == 0x16u ? 10 : 15;
+            g_rnd.enemy.push_back({id, w});
+        }
+        g_rnd.boss = {{0x29u, 2}, {0x2Eu, 2}, {0x82u, 2}, {0x8Eu, 1}, {0x9Cu, 2}, {0x9Du, 1}};
+        g_rnd.arena = {{0x29u, 10}, {0x2Eu, 10}, {0x82u, 10}, {0x8Eu, 10}, {0x9Cu, 10}, {0x9Du, 10}};
+        g_rnd.item = {{0x21u, 45}, {0x46u, 12}, {0x52u, 9}, {0x51u, 8}, {0x45u, 4}, {0x4Eu, 2}, {0x20u, 5}, {0x25u, 6}};
+        // Every structure of the game (kStructures). The ones that stand in the way (doors, walls, the thorn vine,
+        // the popping platforms) and the monster generator are rarer; all of them can be smashed or passed.
+        g_rnd.structure.clear();
+        for (const StructureType &t : kStructures)
+        {
+            const uint32_t id = t.id;
+            const bool inTheWay = id == 0xAAu || id == 0xB1u || id == 0xC9u || id == 0xBBu || id == 0x0Au || id == 0x1Bu;
+            const int w = id == 0x5Fu ? 2 : inTheWay ? 3 : id == 0x01u || id == 0x4Au ? 4
+                        : id == 0xAEu || id == 0xB5u || id == 0xC8u || id == 0xD3u ? 5 : id == 0x6Cu ? 10 : 8;
+            g_rnd.structure.push_back({id, w});
+        }
+        g_rnd.skill.clear();
+        for (const PickupType &k : kSkills)
+            g_rnd.skill.push_back({k.id, k.id == 22u ? 3 : 5});
+        for (const PickupType &k : kSwordPowers)
+            g_rnd.skill.push_back({k.id, 3});
+        g_rnd.chest = {{"gold", -1, 30}, {"health", 20, 15}, {"life", 21, 5},       {"armor", 30, 10},
+                       {"fire", 23, 7},  {"ice", 24, 7},     {"sun", 25, 7},        {"armageddon", 29, 7},
+                       {"mimic", -2, 12}};
+    }
+
+    void randomizerConfigure()
+    {
+        randomizerDefaults();
+        const char *on = std::getenv("MAXIMO_RANDOMIZER");
+        g_rnd.on = on && std::strcmp(on, "0") != 0;
+        if (!g_rnd.on)
+            return;
+        if (const char *seed = std::getenv("MAXIMO_RND_SEED"))
+            g_rnd.seed = std::strtoull(seed, nullptr, 10);
+        if (const char *opts = std::getenv("MAXIMO_RND_OPTIONS"))
+        {
+            const std::string o = std::string(",") + opts + ",";
+            auto has = [&](const char *k) { return o.find(std::string(",") + k + ",") != std::string::npos; };
+            g_rnd.enemies = has("enemies");
+            g_rnd.structures = has("structures");
+            g_rnd.items = has("items");
+            g_rnd.skills = has("skills");
+            g_rnd.chests = has("chests");
+            g_rnd.bossEnemies = has("bossenemies");
+            g_rnd.bossArenas = has("bossarenas");
+        }
+        int read = 0;
+        if (const char *rates = std::getenv("MAXIMO_RND_RATES"))
+        {
+            std::ifstream in{fs::path(rates)};
+            std::string line;
+            while (std::getline(in, line))
+            {
+                const size_t hash = line.find('#');
+                if (hash != std::string::npos)
+                    line.resize(hash);
+                char cat[32] = {}, id[32] = {};
+                int weight = 0;
+                if (std::sscanf(line.c_str(), "%31s %31s %d", cat, id, &weight) != 3)
+                    continue;
+                weight = std::clamp(weight, 0, 1000);
+                const std::string c = cat;
+                if (c == "chest")
+                {
+                    for (RndChestPrize &p : g_rnd.chest)
+                        if (std::strcmp(p.name, id) == 0)
+                            p.weight = weight, ++read;
+                    continue;
+                }
+                std::vector<RndRate> *table = c == "enemy" ? &g_rnd.enemy : c == "boss" ? &g_rnd.boss
+                                            : c == "arena" ? &g_rnd.arena
+                                            : c == "item" ? &g_rnd.item : c == "structure" ? &g_rnd.structure
+                                            : c == "skill" ? &g_rnd.skill : nullptr;
+                if (!table)
+                    continue;
+                const uint32_t v = static_cast<uint32_t>(std::strtoul(id, nullptr, 0));
+                for (RndRate &r : *table)
+                    if (r.id == v)
+                        r.weight = weight, ++read;
+            }
+        }
+        logf("randomizer: on, seed %llu (enemies %d, structures %d, items %d, skills %d, chests %d, bosses as enemies "
+             "%d, boss arenas %d), %d spawn rates from the editor's file",
+             static_cast<unsigned long long>(g_rnd.seed), g_rnd.enemies, g_rnd.structures, g_rnd.items, g_rnd.skills,
+             g_rnd.chests, g_rnd.bossEnemies, g_rnd.bossArenas, read);
+    }
+
+    uint64_t rndMix(uint64_t x)
+    {
+        x += 0x9E3779B97F4A7C15ull;
+        x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+        x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+        return x ^ (x >> 31);
+    }
+
+    // The level file's records: type, instance name, position (the .PSX on the disc, as maximo1randomizer's psx.py
+    // reads it: a 0x200-byte header with the class and instance names, then type, id, property count, position).
+    struct LevelRecord
+    {
+        uint32_t type;
+        std::string name;
+        float pos[3];
+        bool guarded = false; // in a progression group (items and structures there are left alone)
+        bool key1 = false;    // the "key1" object: nothing named so is touched
+        int phase = -1;       // a hub's phase group P<n>_ / FP<n>_: the n
+    };
+    std::vector<LevelRecord> readLevelRecords(int row)
+    {
+        std::vector<LevelRecord> out;
+        if (row < 0 || row >= 31)
+            return out;
+        const char *file = kLevelFiles[row];
+        const char *world = file[0] == 'G' ? "GRAVE" : file[0] == 'S' ? "SWAMP" : file[0] == 'I' ? "ICESHIP"
+                          : file[0] == 'U' ? "UNDER" : "CASTLE";
+        const fs::path path = g_disc / "PSXDATA" / world / (std::string(file) + ".PSX");
+        std::ifstream in(path, std::ios::binary);
+        const std::vector<uint8_t> d((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        auto classBuffer = [&](size_t at)
+        {
+            if (at + 0x100 > d.size() || d[at] < 'A' || d[at] > 'Z')
+                return false;
+            size_t end = at;
+            while (end < at + 64 && d[end] >= 32 && d[end] < 127)
+                ++end;
+            if (end - at < 3 || d[end] != 0)
+                return false;
+            int cd = 0;
+            for (size_t j = end + 1; j < at + 0x100 && d[j] == 0xCD; ++j)
+                ++cd;
+            return cd >= 200;
+        };
+        auto u32 = [&](size_t at) { uint32_t v; std::memcpy(&v, &d[at], 4); return v; };
+        for (size_t i = 0x100; i + 0x228 <= d.size();)
+        {
+            if (!classBuffer(i))
+            {
+                i += 4;
+                continue;
+            }
+            LevelRecord r;
+            const size_t ent = i + 0x200;
+            r.type = d[ent + 4];
+            for (size_t k = i + 0x100; k < i + 0x200 && d[k]; ++k)
+                r.name.push_back(static_cast<char>(d[k]));
+            std::memcpy(r.pos, &d[ent + 0x10], 12);
+            const uint32_t count = u32(ent + 0xC);
+            out.push_back(r);
+            const size_t size = 0x228 + static_cast<size_t>(std::min(count, 4096u)) * 0x20u;
+            i += classBuffer(i + size) ? size : 4;
+        }
+        // The randomizer's progression guard (get_progression_protected_names, PROTECTED_INSTANCE_NAMES and the hub
+        // phase markers).
+        auto lower = [](std::string s) { for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return s; };
+        std::set<std::string> guarded = {"key1"};
+        for (const LevelRecord &r : out)
+        {
+            const std::string n = lower(r.name);
+            if (n.empty())
+                continue;
+            if (n.size() > 3 && n.compare(0, 3, "end") == 0 &&
+                std::all_of(n.begin() + 3, n.end(), [](char c) { return c >= '0' && c <= '9'; }))
+                guarded.insert(n);
+            const bool anchor = r.type == 0x2Bu || r.type == 0x59u || r.type == 0x65u || r.type == 0x5Fu;
+            const bool autoName = n.rfind("wooden_chest_", 0) == 0 || n.rfind("locked_chest_", 0) == 0 ||
+                                  n.rfind("skeleton_key_", 0) == 0 || n.rfind("gold_key_", 0) == 0 ||
+                                  n.rfind("level_column_", 0) == 0;
+            if (anchor && !autoName)
+                guarded.insert(n);
+        }
+        for (LevelRecord &r : out)
+        {
+            const std::string n = lower(r.name);
+            r.guarded = guarded.count(n) > 0;
+            r.key1 = n == "key1";
+            for (const char *p : {"p1_", "p2_", "p3_", "p4_", "fp1_", "fp2_", "fp3_", "fp4_"})
+                if (n.rfind(p, 0) == 0)
+                {
+                    r.guarded = true;
+                    r.phase = p[0] == 'f' ? p[2] - '0' : p[1] - '0';
+                }
+        }
+        logf("randomizer: %s: %zu records read, %zu progression groups guarded", path.string().c_str(), out.size(),
+             guarded.size());
+        return out;
+    }
+
+    // Writes one property of a live object: into its kept list (the spawn block, what a reset puts back) and into its
+    // variable now, as the loader does. Only properties the object already lists can change.
+    bool setObjectProp(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime, uint32_t vm, uint32_t obj,
+                       uint32_t index, uint32_t value, uint32_t scratch)
+    {
+        auto inRam = [](uint32_t a) { return a != 0 && (a & PS2_RAM_MASK) == a; };
+        const uint32_t props = rd32(obj + 0xF8u), count = rd32(obj + 0xFCu), vars = rd32(obj + 0x84u);
+        const uint32_t cls = rd32(obj + 0xB4u);
+        if (!inRam(props) || count == 0 || count > 256u || !inRam(cls))
+            return false;
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            const uint32_t e = props + i * 32u;
+            if (rd32(e + 4u) != index)
+                continue;
+            wr32(e + 8u, value);
+            if (inRam(vars))
+            {
+                const uint32_t entry = scratch + 0x40u, context = scratch + 0x80u;
+                std::memset(mem(context), 0, 0x40);
+                std::memcpy(mem(entry), mem(e), 32);
+                uint32_t v0 = 0;
+                callGuestArgs(rdram, ctx, runtime, kPropApplyFn, {vm, vars, rd32(cls + 0x10u), entry, context, 0, 0, 0}, v0);
+            }
+            return true;
+        }
+        return false;
+    }
+    uint32_t objectProp(uint32_t obj, uint32_t index, bool &found)
+    {
+        const uint32_t props = rd32(obj + 0xF8u), count = rd32(obj + 0xFCu);
+        found = false;
+        if (!props || (props & PS2_RAM_MASK) != props || count > 256u)
+            return 0;
+        for (uint32_t i = 0; i < count; ++i)
+            if (rd32(props + i * 32u + 4u) == index)
+            {
+                found = true;
+                return rd32(props + i * 32u + 8u);
+            }
+        return 0;
+    }
+
+    constexpr uint32_t kSubLevelDoneFn = GA(0x0011FD30u), kAppAddr = GA(0x00239880u);
+    void randomizeLevel(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t vm = rd32(kLevelVmPtr);
+        const int row = static_cast<int>(rd32(kCurrentLevelAddr));
+        if (!vm || row < 0 || row >= 31)
+            return;
+        auto inRam = [](uint32_t a) { return a != 0 && (a & PS2_RAM_MASK) == a; };
+        std::vector<LevelRecord> records = readLevelRecords(row);
+        std::vector<bool> used(records.size(), false);
+        // Every class this world has, looked up once before the stack is lowered (see spawnPickups).
+        std::map<uint32_t, uint32_t> classOf;
+        auto lookup = [&](uint32_t id)
+        {
+            auto it = classOf.find(id);
+            if (it != classOf.end())
+                return it->second;
+            uint32_t cls = 0;
+            if (!callGuest(rdram, ctx, runtime, kClassLookupFn, vm + 0xB8u, id, 0, cls))
+                cls = 0;
+            classOf[id] = cls;
+            return cls;
+        };
+        for (const auto *t : {&g_rnd.enemy, &g_rnd.boss, &g_rnd.arena, &g_rnd.item, &g_rnd.structure})
+            for (const RndRate &r : *t)
+                lookup(r.id);
+        auto isIn = [](const std::vector<RndRate> &t, uint32_t id)
+        { return std::any_of(t.begin(), t.end(), [&](const RndRate &r) { return r.id == id; }); };
+        std::map<uint32_t, int> made;          // per type, this level (the caps)
+        const std::map<uint32_t, int> caps = {{0x4Eu, 2}, {0x45u, 2}, {0x20u, 3}, {0x25u, 4}};
+        int bossesMade = 0;
+        constexpr uint32_t kNone = ~0u;
+        // A weighted pick (kNone: nothing can be picked). Class tables only offer what this world has loaded.
+        bool noUnkillable = false; // this pick is for a group that may have to be cleared: no axe guard or raven
+        auto pick = [&](const std::vector<RndRate> &table, uint64_t &h, bool bossTable, bool classes = true) -> uint32_t
+        {
+            int total = 0;
+            std::vector<std::pair<uint32_t, int>> live;
+            for (const RndRate &r : table)
+            {
+                if (r.weight <= 0 || (classes && !lookup(r.id)))
+                    continue;
+                if (noUnkillable && (r.id == 0x16u || r.id == 0x37u))
+                    continue;
+                const auto cap = caps.find(r.id);
+                if (cap != caps.end() && made[r.id] >= cap->second)
+                    continue;
+                if (bossTable && bossesMade >= 2)
+                    continue;
+                live.push_back({r.id, r.weight});
+                total += r.weight;
+            }
+            if (total <= 0)
+                return kNone;
+            h = rndMix(h);
+            int roll = static_cast<int>(h % static_cast<uint64_t>(total));
+            for (const auto &[id, w] : live)
+                if ((roll -= w) < 0)
+                    return id;
+            return live.back().first;
+        };
+        struct Job
+        {
+            uint32_t obj, from, to;
+            float pos[3], yaw;
+            std::vector<RecordProp> props;
+            bool copy = false; // variables and properties from a live one of the class (enemies)
+            bool boss = false;
+        };
+        std::vector<Job> jobs;
+        int abilities = 0, chests = 0, guarded = 0, total = 0;
+        const uint32_t savedSp = reg(ctx, 29);
+        const uint32_t sp = (savedSp - 0x200u) & ~0xFu;
+        for (uint32_t o = rd32(vm + 0x9Cu + 8u), guard = 0; inRam(o) && guard < 20000; o = rd32(o + 0xBCu), ++guard)
+        {
+            const uint32_t cls = rd32(o + 0xB4u);
+            if (!inRam(cls) || rd32(o + 0xF0u) != 1u || isSpawnedHandle(rd32(o)))
+                continue;
+            const uint32_t type = rd32(cls);
+            float pos[3], rot[3];
+            std::memcpy(pos, mem(o + 0x100u), 12);
+            std::memcpy(rot, mem(o + 0x10Cu), 12);
+            if (!std::isfinite(pos[0]) || !std::isfinite(pos[1]) || !std::isfinite(pos[2]))
+                continue;
+            const bool enemy = g_rnd.enemies && std::any_of(kEnemyTypes, kEnemyTypes + kOrdinaryEnemyCount,
+                                                            [&](const EnemyType &e) { return e.id == type; });
+            const bool item = g_rnd.items && (type == 0x21u || type == 0x46u || type == 0x52u || type == 0x51u ||
+                                              type == 0x4Eu || type == 0x45u);
+            // (the scripted props - spirit statue, tiki torch, underworld lantern, swamp coffin lid - and the monster
+            // generator are never taken away: HAZARD_PROTECTED_AS_SOURCE and the progression anchors)
+            const bool structure = g_rnd.structures && isIn(g_rnd.structure, type) && type != 0xB5u && type != 0xC8u &&
+                                   type != 0xD3u && type != 0xAEu && type != 0x5Fu;
+            const bool ability = g_rnd.skills && type == kAbilityType;
+            const bool chest = g_rnd.chests && type == 0x25u;
+            if (!enemy && !item && !structure && !ability && !chest)
+                continue;
+            ++total;
+            // Its record in the level file: the same type at the same place.
+            int rec = -1;
+            for (size_t i = 0; i < records.size() && rec < 0; ++i)
+                if (!used[i] && records[i].type == type && std::fabs(records[i].pos[0] - pos[0]) < 0.01f &&
+                    std::fabs(records[i].pos[1] - pos[1]) < 0.01f && std::fabs(records[i].pos[2] - pos[2]) < 0.01f)
+                    rec = static_cast<int>(i);
+            if (rec >= 0)
+                used[rec] = true;
+            if (rec >= 0 && records[rec].guarded)
+            {
+                // Enemies are swapped in the level-finisher and key groups too (nothing waits for their deaths: the
+                // groups are the areas the level wakes together), but not:
+                // - "key1", nor an axe skeleton that carries a skeleton key (its property 5);
+                // - in a hub, a phase group's enemy whose phase has not come yet (its script hides it until the
+                //   sub-level of its number is completed: CheckSubLevelCompleted(property 5) -> func_0011FD30).
+                bool keep = !enemy || records[rec].key1;
+                bool f = false;
+                if (!keep && records[rec].phase < 0 && type == 0x2Fu && objectProp(o, 5u, f) != 0u)
+                    keep = true;
+                if (!keep && records[rec].phase >= 0)
+                {
+                    uint32_t done = 0;
+                    if (!callGuest(rdram, ctx, runtime, kSubLevelDoneFn, kAppAddr, static_cast<uint32_t>(records[rec].phase), 0, done) ||
+                        (done & 0xFFu) == 0u)
+                        keep = true;
+                }
+                if (keep)
+                {
+                    ++guarded;
+                    continue;
+                }
+            }
+            else if (enemy && type == 0x2Fu)
+            {
+                bool f = false;
+                if (objectProp(o, 5u, f) != 0u)
+                {
+                    ++guarded; // (it drops a skeleton key)
+                    continue;
+                }
+            }
+            uint32_t bits[3];
+            std::memcpy(bits, pos, 12);
+            uint64_t h = rndMix(g_rnd.seed ^ (static_cast<uint64_t>(row) << 40) ^
+                                (rec >= 0 ? static_cast<uint64_t>(rec) * 0x100000001B3ull
+                                          : (static_cast<uint64_t>(bits[0]) << 32 | bits[2]) ^ type));
+            if (ability)
+            {
+                const uint32_t id = pick(g_rnd.skill, h, false, false);
+                if (id != kNone)
+                {
+                    SET_GPR_U32(ctx, 29, sp);
+                    if (setObjectProp(rdram, ctx, runtime, vm, o, 0u, id, sp + 0x20u))
+                        ++abilities;
+                    SET_GPR_U32(ctx, 29, savedSp);
+                }
+                continue;
+            }
+            if (chest)
+            {
+                // A chest that gives a key (31) or the level-finishing coin (34 as its only prize) keeps its contents.
+                bool f = false;
+                bool keyChest = objectProp(o, 31u, f) != 0u;
+                if (objectProp(o, 34u, f) != 0u)
+                {
+                    bool other = false;
+                    for (uint32_t k : {19u, 20u, 21u, 23u, 24u, 25u, 29u, 30u, 15u, 16u})
+                    {
+                        bool g = false;
+                        other = other || objectProp(o, k, g) != 0u;
+                    }
+                    keyChest = keyChest || !other;
+                }
+                if (keyChest || (rec >= 0 && (records[rec].name == "key1" || records[rec].name == "gate1")))
+                {
+                    ++guarded;
+                    continue;
+                }
+                int sum = 0;
+                for (const RndChestPrize &p : g_rnd.chest)
+                    sum += std::max(0, p.weight);
+                if (sum <= 0)
+                    continue;
+                h = rndMix(h);
+                int roll = static_cast<int>(h % static_cast<uint64_t>(sum));
+                const RndChestPrize *prize = &g_rnd.chest[0];
+                for (const RndChestPrize &p : g_rnd.chest)
+                    if ((roll -= std::max(0, p.weight)) < 0)
+                    {
+                        prize = &p;
+                        break;
+                    }
+                SET_GPR_U32(ctx, 29, sp);
+                for (uint32_t k : {19u, 20u, 21u, 23u, 24u, 25u, 29u, 30u})
+                    setObjectProp(rdram, ctx, runtime, vm, o, k, static_cast<int>(k) == prize->prop ? 1u : 0u, sp + 0x20u);
+                setObjectProp(rdram, ctx, runtime, vm, o, 6u, prize->prop == -2 ? 1u : 0u, sp + 0x20u);
+                SET_GPR_U32(ctx, 29, savedSp);
+                ++chests;
+                continue;
+            }
+            Job j;
+            j.obj = o;
+            j.from = type;
+            std::memcpy(j.pos, pos, 12);
+            j.yaw = rot[1];
+            if (enemy)
+            {
+                h = rndMix(h);
+                const bool asBoss = g_rnd.bossEnemies && bossesMade < 2 && h % 100u < 4u;
+                j.to = asBoss ? pick(g_rnd.boss, h, true) : kNone;
+                j.boss = j.to != kNone;
+                if (!j.boss)
+                {
+                    // In a level-finisher, key or hub phase group: an enemy that can be killed (not the axe guard)
+                    // and is worth fighting (not the raven).
+                    noUnkillable = rec >= 0 && records[rec].guarded;
+                    j.to = pick(g_rnd.enemy, h, false);
+                    noUnkillable = false;
+                }
+                j.copy = !j.boss;
+                if (j.to == 0x5Du) // the Doomed Soul's wake-up spheres (see spawnPicked)
+                {
+                    j.props = {{7u, 0u, 0u}, {12u, 1u, 0x41A00000u}, {12u, 5u, 0x41F00000u}, {7u, 9u, 0u}};
+                    j.copy = false;
+                }
+                if (j.boss)
+                    ++bossesMade;
+            }
+            else if (item)
+            {
+                j.to = pick(g_rnd.item, h, false);
+                if (j.to == kAbilityType)
+                {
+                    const uint32_t id = pick(g_rnd.skill, h, false, false);
+                    j.props = abilityProps(id == kNone ? 1u : id);
+                }
+                else if (j.to != kNone)
+                    j.props = itemProps(j.to);
+                if (j.to == 0x25u && g_rnd.chests)
+                {
+                    // A new chest gets one prize from the chest rates (or the mimic).
+                    int sum = 0;
+                    for (const RndChestPrize &p : g_rnd.chest)
+                        sum += std::max(0, p.weight);
+                    const RndChestPrize *prize = nullptr;
+                    if (sum > 0)
+                    {
+                        h = rndMix(h);
+                        int roll = static_cast<int>(h % static_cast<uint64_t>(sum));
+                        for (const RndChestPrize &p : g_rnd.chest)
+                            if (!prize && (roll -= std::max(0, p.weight)) < 0)
+                                prize = &p;
+                    }
+                    for (RecordProp &p : j.props)
+                        if (p.type == 7u && ((p.index >= 19u && p.index <= 32u) || p.index == 6u))
+                            p.value = prize && (static_cast<int>(p.index) == prize->prop || (p.index == 6u && prize->prop == -2)) ? 1u : 0u;
+                }
+            }
+            else
+            {
+                j.to = pick(g_rnd.structure, h, false);
+                j.props = structureProps(j.to);
+            }
+            if (j.to == kNone || j.to == j.from)
+            {
+                if (j.boss)
+                    --bossesMade;
+                continue;
+            }
+            ++made[j.to];
+            jobs.push_back(std::move(j));
+        }
+        // Out with the old ones first (all at once: none is a boss, so nothing needs the RAM search), then the new.
+        for (const Job &j : jobs)
+            destroyLevelObject(rdram, ctx, runtime, vm, j.obj, false);
+        SET_GPR_U32(ctx, 29, sp);
+        int ok = 0, failed = 0;
+        std::string why;
+        for (const Job &j : jobs)
+        {
+            const uint32_t tmpl = lookup(j.to);
+            if (!tmpl)
+                continue;
+            if (j.to == kQueenType)
+                spawnQueenWaypoints(rdram, ctx, runtime, vm, j.pos, sp + 0x20u);
+            g_spawnYaw.set = true;
+            g_spawnYaw.degrees = j.yaw;
+            g_spawnSkipIntro = j.boss;
+            const uint32_t handle = spawnOne(rdram, ctx, runtime, vm, tmpl, j.pos, sp + 0x20u, why,
+                                             j.copy ? nullptr : &j.props, nullptr);
+            g_spawnSkipIntro = false;
+            g_spawnYaw.set = false;
+            if (!handle)
+            {
+                ++failed;
+                continue;
+            }
+            ++ok;
+            const uint32_t obj = g_spawnedObjects.empty() ? 0u : g_spawnedObjects.back().obj;
+            if (!obj || rd32(obj) != handle)
+                continue;
+            if (j.boss)
+                for (DebugBoss &b : g_debugBosses)
+                    if (b.obj == obj)
+                        b.natural = true;
+            if (j.copy)
+            {
+                // Copied from another one of its class: its wake-up spheres are moved here, and the drops the
+                // randomizer clamps (ENEMY_FORCE_PROPS: the axe skeleton's skeleton key, the swamp zombie's and
+                // crocodile's hub wave marker) are cleared.
+                const uint32_t props = rd32(obj + 0xF8u), count = rd32(obj + 0xFCu);
+                for (uint32_t i = 0; inRam(props) && count < 256u && i < count; ++i)
+                {
+                    const uint32_t e = props + i * 32u;
+                    if ((rd32(e) & 0xFFu) == 12u)
+                    {
+                        std::memcpy(mem(e + 8u), j.pos, 12);
+                        setObjectProp(rdram, ctx, runtime, vm, obj, rd32(e + 4u), rd32(e + 8u), sp + 0x20u);
+                        // (the centre: setObjectProp copies the whole entry)
+                    }
+                }
+                // Its hub phase (the sub-level it waits for, hidden until then: measured in the hubs' P<n>_ records
+                // per class) back to 0, or a copy of a later phase's enemy stayed hidden.
+                if (const uint32_t index = phasePropIndex(j.to); index != ~0u)
+                    setObjectProp(rdram, ctx, runtime, vm, obj, index, 0u, sp + 0x20u);
+            }
+        }
+        SET_GPR_U32(ctx, 29, savedSp);
+        logf("randomizer: %s (row %d): %d candidates, %d guarded, %zu swapped (%d made, %d failed%s%s), %d abilities and "
+             "%d chests changed, %d bosses as enemies",
+             kLevelNames[row], row, total, guarded, jobs.size(), ok, failed, why.empty() ? "" : "; last: ", why.c_str(),
+             abilities, chests, bossesMade);
+    }
+
+    // A boss arena's boss swapped for another (randomize boss fights): the arena's own boss is parked (unlinked
+    // and kept out of sight, as survival does with Lord Glutterscum: an arena keeps pointers into its boss, so it
+    // is never destroyed), the stand-in is made where it stood, and when the stand-in dies the arena ends the way
+    // the arena boss's own death does (its script: SaveApparitionData(0, 0xFF) on itself, then GotoNextLevel ->
+    // mglGotoNextLevel, func_00120ED0: app mode 6, exit code 3). A death of Maximo's resets the arena (the parked
+    // boss is linked back for that): the swap is made again once the reset is done.
+    constexpr uint32_t kGotoNextLevelFn = GA(0x00120ED0u);
+    bool randomizerArenaSwap(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t vm = rd32(kLevelVmPtr);
+        auto inRam = [](uint32_t a) { return a != 0 && (a & PS2_RAM_MASK) == a; };
+        if (!vm)
+            return false;
+        uint32_t native = 0, nativeType = 0;
+        for (uint32_t o = rd32(vm + 0x9Cu + 8u), guard = 0; inRam(o) && guard < 20000; o = rd32(o + 0xBCu), ++guard)
+        {
+            const uint32_t cls = rd32(o + 0xB4u);
+            const uint32_t type = inRam(cls) ? rd32(cls) : 0u;
+            if (std::find(std::begin(kBossTypes), std::end(kBossTypes), type) != std::end(kBossTypes) &&
+                !isSpawnedHandle(rd32(o)))
+            {
+                native = o;
+                nativeType = type;
+                break;
+            }
+        }
+        if (!native)
+        {
+            logf("randomizer: arena %s: no boss of its own found", kLevelNames[rd32(kCurrentLevelAddr) % 31u]);
+            return false;
+        }
+        g_rnd.nativeObj = native;
+        g_rnd.nativeHandle = rd32(native);
+        g_rnd.nativeType = nativeType;
+        std::memcpy(g_rnd.arenaPos, mem(native + 0x100u), 12);
+        // The stand-in: the one already made (a death's reset keeps it), else a pick from the arena rates.
+        const uint32_t oldObj = g_rnd.standInHandle ? objectForHandle(g_rnd.standInHandle) : 0u;
+        bool standInAlive = oldObj && std::any_of(g_debugBosses.begin(), g_debugBosses.end(), [&](const DebugBoss &b)
+                                                  { return b.handle == g_rnd.standInHandle && !b.removeAt; });
+        uint32_t tmpl = 0, type = g_rnd.standInType;
+        if (!standInAlive)
+        {
+            int total = 0;
+            std::vector<std::pair<uint32_t, int>> live;
+            std::map<uint32_t, uint32_t> classes;
+            for (const RndRate &r : g_rnd.arena)
+            {
+                uint32_t cls = 0;
+                if (r.weight <= 0 || r.id == nativeType ||
+                    !callGuest(rdram, ctx, runtime, kClassLookupFn, vm + 0xB8u, r.id, 0, cls) || !cls)
+                    continue;
+                classes[r.id] = cls;
+                live.push_back({r.id, r.weight});
+                total += r.weight;
+            }
+            if (total <= 0)
+            {
+                logf("randomizer: arena: no other boss can be picked (rates at 0, or not loaded: is the cross-world tool on?)");
+                return false;
+            }
+            int roll = static_cast<int>(rndMix(g_rnd.seed ^ 0xB055ull ^ static_cast<uint64_t>(nativeType) << 32) %
+                                        static_cast<uint64_t>(total));
+            type = live.back().first;
+            for (const auto &[id, w] : live)
+                if ((roll -= w) < 0)
+                {
+                    type = id;
+                    break;
+                }
+            tmpl = classes[type];
+        }
+        parkLevelObject(rdram, ctx, runtime, vm, native);
+        const char *name = "?";
+        for (const EnemyType &e : kEnemyTypes)
+            if (e.id == type)
+                name = e.name;
+        if (standInAlive)
+        {
+            logf("randomizer: arena %s: the boss parked again after the reset; %s still stands in",
+                 kLevelNames[rd32(kCurrentLevelAddr) % 31u], name);
+            return true;
+        }
+        const uint32_t savedSp = reg(ctx, 29);
+        const uint32_t sp = (savedSp - 0x200u) & ~0xFu;
+        SET_GPR_U32(ctx, 29, sp);
+        if (type == kQueenType)
+            spawnQueenWaypoints(rdram, ctx, runtime, vm, g_rnd.arenaPos, sp + 0x20u);
+        std::string why;
+        g_spawnSkipIntro = true;
+        const uint32_t handle = spawnOne(rdram, ctx, runtime, vm, tmpl, g_rnd.arenaPos, sp + 0x20u, why, nullptr, nullptr);
+        g_spawnSkipIntro = false;
+        SET_GPR_U32(ctx, 29, savedSp);
+        logf("randomizer: arena %s: the boss (type 0x%02X) swapped for %s (type 0x%02X): %s",
+             kLevelNames[rd32(kCurrentLevelAddr) % 31u], nativeType, name, type, handle ? "made" : why.c_str());
+        if (!handle)
+        {
+            unparkAll(); // the arena's own boss comes back: the fight stays winnable
+            return false;
+        }
+        g_rnd.standInHandle = handle;
+        g_rnd.standInType = type;
+        return true;
+    }
+
+    void randomizerArenaTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        const uint32_t lives = rd32(gameVarAddr(kVarLives));
+        const bool died = lives < g_rnd.lives;
+        g_rnd.lives = lives;
+        if (g_rnd.arenaPhase == 1 && died)
+        {
+            g_rnd.arenaRedoAt = g_dbg.padFrames + 90u; // the reset brings the parked boss back: swap again after it
+            return;
+        }
+        if (g_rnd.arenaPhase == 1 && g_rnd.arenaRedoAt && g_dbg.padFrames >= g_rnd.arenaRedoAt)
+        {
+            g_rnd.arenaRedoAt = 0;
+            if (!randomizerArenaSwap(rdram, ctx, runtime))
+                g_rnd.arenaPhase = 3;
+            return;
+        }
+        if (g_rnd.arenaPhase == 1 && !g_rnd.arenaRedoAt)
+        {
+            const uint32_t obj = objectForHandle(g_rnd.standInHandle);
+            const auto it = std::find_if(g_debugBosses.begin(), g_debugBosses.end(),
+                                         [&](const DebugBoss &b) { return b.handle == g_rnd.standInHandle; });
+            if (!obj || it == g_debugBosses.end() || it->removeAt)
+            {
+                g_rnd.arenaPhase = 2;
+                g_rnd.arenaDeadAt = g_dbg.padFrames;
+                logf("randomizer: arena: the stand-in boss is beaten; the arena ends in 3 seconds");
+            }
+            return;
+        }
+        if (g_rnd.arenaPhase == 2 && g_dbg.padFrames >= g_rnd.arenaDeadAt + 180u)
+        {
+            g_rnd.arenaPhase = 3;
+            // The arena boss's own death: its "beaten" apparition byte (slot 0, see spawnOne), then the next level.
+            const uint32_t obj = g_rnd.nativeObj;
+            if (obj && rd32(obj) == g_rnd.nativeHandle && g_rnd.nativeHandle < 0x17Cu)
+            {
+                const uint32_t context = rd32(obj + 0xF4u);
+                const uint32_t table = context && (context & PS2_RAM_MASK) == context ? rd32(context + 0xE08u) : 0u;
+                if (table && (table & PS2_RAM_MASK) == table)
+                    *mem(table + g_rnd.nativeHandle + 3u) = 0xFFu;
+            }
+            uint32_t v0 = 0;
+            callGuest(rdram, ctx, runtime, kGotoNextLevelFn, 1000u, 0, 0, v0);
+            logf("randomizer: arena: next level (exit code %u)", rd32(kLevelExitCodeAddr));
+        }
+    }
+
+    bool debugBossFighting(const DebugBoss &b)
+    {
+        if (!b.natural)
+            return true;
+        float feet[3];
+        const uint32_t ent = rd32(b.obj + 0xB8u);
+        const uint32_t act = ent && (ent & PS2_RAM_MASK) == ent ? rd32(ent) : 0u;
+        if (!act || (act & PS2_RAM_MASK) != act || !maximoFeet(feet))
+            return false;
+        float p[3];
+        std::memcpy(p, mem(act + 0xA0u), 12);
+        const float dx = p[0] - feet[0], dy = p[1] - feet[1], dz = p[2] - feet[2];
+        return dx * dx + dy * dy + dz * dz < 30.0f * 30.0f;
+    }
+
+    void randomizerTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (!g_rnd.on)
+            return;
+        // In a level: the level VM is there, its objects are made and Maximo stands somewhere. (g_dbg.inLevel was
+        // only brought up to date when the debug menu opened: the randomizer waited for that. It is kept up to date
+        // here, which the bosses' handling - their death, the parked boss - also needs.)
+        const uint32_t vmNow = rd32(kLevelVmPtr);
+        const bool vmOk = vmNow && (vmNow & PS2_RAM_MASK) == vmNow;
+        g_dbg.inLevel = vmOk;
+        float feetNow[3];
+        const bool here = vmOk && rd32(kLevelExitCodeAddr) == 0 && rd32(vmNow + 0x9Cu + 8u) != 0 &&
+                          rd32(kCurrentLevelAddr) < 31u && maximoFeet(feetNow);
+        // A level change (exit code set) or leaving the levels arms the next level's pass; it runs as the new level
+        // starts (its objects are all made by then), not again after a death in it.
+        if (!here && (!vmOk || rd32(kLevelExitCodeAddr) != 0))
+        {
+            g_rnd.armed = true;
+            g_rnd.readyAt = 0;
+            g_rnd.arenaPhase = 0;
+            g_rnd.arenaRedoAt = 0;
+            g_rnd.standInHandle = 0;
+            return;
+        }
+        if (!here)
+            return;
+        if (g_survival.active || g_net.mode != 0)
+            return; // survival and netplay keep the levels as they are
+        // The bosses standing in for enemies: their boss camera and health bar (the boss flags, gPlayer+0x8B8, and
+        // camera mode 4 at gPlayer+0x248) only while one of them is near Maximo.
+        if (g_rnd.arenaPhase == 0 &&
+            std::any_of(g_debugBosses.begin(), g_debugBosses.end(), [](const DebugBoss &b) { return b.natural; }) &&
+            std::none_of(g_debugBosses.begin(), g_debugBosses.end(), debugBossFighting) &&
+            (rd32(kPlayerAddr + 0x8B8u) != 0u || rd32(kPlayerAddr + 0x248u) == 4u))
+        {
+            wr32(kPlayerAddr + 0x8B8u, 0u);
+            if (rd32(kPlayerAddr + 0x248u) == 4u)
+                wr32(kPlayerAddr + 0x248u, 0u);
+            uint32_t v0 = 0;
+            callGuest(rdram, ctx, runtime, GA(0x00145F80u), kWorldAddr, 0, 0, v0); // the boss meter off
+        }
+        const int rowNow = static_cast<int>(rd32(kCurrentLevelAddr));
+        const bool arena = rowNow == 5 || rowNow == 11 || rowNow == 17 || rowNow == 23 || rowNow == 28 || rowNow == 29;
+        if (g_rnd.armed)
+        {
+            if (!g_rnd.readyAt) // (as soon as the level runs: before the first look at it, and its boss's fight)
+                g_rnd.readyAt = g_dbg.padFrames + 6u; // (a tenth of a second: under the level's fade-in)
+            if (g_dbg.padFrames < g_rnd.readyAt)
+                return;
+            g_rnd.armed = false;
+            const int row = static_cast<int>(rd32(kCurrentLevelAddr));
+            if (row == 30)
+                return; // the bonus level is left alone
+            g_rnd.lives = rd32(gameVarAddr(kVarLives));
+            if (arena && g_rnd.bossArenas)
+            {
+                g_rnd.standInHandle = 0;
+                g_rnd.arenaPhase = randomizerArenaSwap(rdram, ctx, runtime) ? 1 : 3;
+            }
+            randomizeLevel(rdram, ctx, runtime);
+        }
+        if (g_rnd.arenaPhase == 1 || g_rnd.arenaPhase == 2)
+            randomizerArenaTick(rdram, ctx, runtime);
+    }
+
     void survivalTick(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         survivalLoadBest();
@@ -9761,7 +10641,8 @@ namespace
                     it->since = g_dbg.padFrames;
                 }
             }
-            else if (type == kKingType && (row != 28 || g_survival.active))
+            else if (type == kKingType && (row != 28 || g_survival.active) && debugBossFighting(b))
+                // (a randomizer King far away is left alone: his change plays its camera, so only near Maximo)
             {
                 uint32_t state = 0;
                 if (!callGuest(rdram, ctx, runtime, GA(0x00103030u), vm, b.handle, 0, state))
@@ -9952,6 +10833,7 @@ namespace
         trackSpawns();
         spawnWakeTick(rdram, ctx, runtime);
         survivalTick(rdram, ctx, runtime);
+        randomizerTick(rdram, ctx, runtime);
         healthBarsTick();
         uint8_t *data = mem(dataAddr);
         const uint16_t buttons = static_cast<uint16_t>(~(data[2] | (data[3] << 8)));
@@ -12452,6 +13334,7 @@ int main(int argc, char **argv)
     const bool widescreen = aspect && std::strcmp(aspect, "16:9") == 0;
     // MAXIMO_OBJECT_BUDGET=more (or 101..1000): let more of a level's enemies and objects run at once.
     g_objectBudget = parseObjectBudget(std::getenv("MAXIMO_OBJECT_BUDGET"));
+    randomizerConfigure();
     if (widescreen)
         ps2_display_aspect::enableWide();
     if (!runtime.initialize("Maximo boot test") || !runtime.loadELF(elf.string()))
