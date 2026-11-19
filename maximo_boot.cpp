@@ -34,6 +34,7 @@
 #include "vu1_capture.h"
 #ifdef MAXIMO_ENABLE_GPU_SHADOW
 #include "gpu_shadow.h"
+#include "native_renderer.h"
 extern std::atomic<uint64_t> g_gpuHostSkippedGifPackets; // (gpu_shadow.cpp)
 #include "runtime/gs/gs_backend.h"
 #endif
@@ -51,6 +52,7 @@ extern std::atomic<uint64_t> g_gpuHostSkippedGifPackets; // (gpu_shadow.cpp)
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <initializer_list>
 #include <chrono>
 #include <cmath>
 #include <cstdarg>
@@ -144,6 +146,7 @@ namespace
 
     PS2Runtime *g_runtime = nullptr;
 #ifdef MAXIMO_ENABLE_GPU_SHADOW
+    void fillNativeHud(native::HudState &h); // (below, with the player's game variables)
     std::unique_ptr<GpuShadow> g_gpuShadow;
     std::vector<uint64_t> g_gpuShadowFrames; // capture frames, ascending; the run stops after the last
     // MAXIMO_GS_BACKEND=gpu: paraLLEl-GS renders and supplies the window frames; the CPU GS keeps only register,
@@ -1186,8 +1189,11 @@ namespace
     constexpr uint32_t kRetailMidPool = 0x640000u, kRetailSmallPool = 0xCB000u;
     // The +0x260 pool is the one the randomizer calls the RESOURCE pool: a world's .PRS models and .PRT textures. Six
     // times retail (37.5 MB) holds a world with every cross-world enemy, the six bosses, Grim and the four sorceresses
-    // (about 25 MB) with the randomizer's 90.4% occupancy margin; the main pool keeps more than 60 MB.
-    constexpr uint32_t kMidPoolScale = 6, kSmallPoolScale = 16;
+    // (about 29 MB). Nine times (56 MB): a jump to another world's level from the debug menu loads the new level's
+    // .TEX and .PSX while the old world's archive is still in the pool (it is unloaded only after them, as a sub-level
+    // change does); with the cross-world graveyard that ran past 37.5 MB, the castle level's .PSX was not loaded and
+    // the old world's archive came back (no level: Maximo fell). The main pool keeps more than 50 MB.
+    constexpr uint32_t kMidPoolScale = 9, kSmallPoolScale = 16;
     constexpr uint32_t kGuestCallMarker = 0x00000004u; // a return address no guest code uses
 
     // Runs a guest function to completion with up to three arguments, keeping the caller's registers. Returns false
@@ -1293,7 +1299,7 @@ namespace
             return;
         }
         // (The launcher's cross-world option looks for "resource pool six times retail" in maximo_boot.exe.)
-        logf("memory: pools rebuilt: main %u KB, +0x260 %u KB (retail %u; resource pool six times retail), "
+        logf("memory: pools rebuilt: main %u KB, +0x260 %u KB (retail %u; resource pool six times retail or more: x9), "
              "+0x140 %u KB (retail %u); ends 0x%07X (block end 0x%07X)",
              poolSizeKb(kMainPool), poolSizeKb(kMidPool), kRetailMidPool / 1024, poolSizeKb(kSmallPool),
              kRetailSmallPool / 1024, next3, blockEnd);
@@ -2964,6 +2970,9 @@ namespace
 
     void survivalClockTick(); // (SURVIVAL TIMER, after g_survival)
 
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+    void nativeFrameEnd(uint64_t guestFrame); // (NATIVE RENDERER, below)
+#endif
     void gsSyncVEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
         // FAST LOADING: every finished frame is marked; when none has come for 4 fields the game is loading, and
@@ -3006,6 +3015,9 @@ namespace
         }
         ++guestFrame;
         g_guestFrame.store(guestFrame, std::memory_order_relaxed);
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+        nativeFrameEnd(guestFrame); // NATIVE RENDERER: this frame's draw commands go to the GS side
+#endif
         g_viewTag[guestFrame & 63u].store(g_viewP2Now ? 1u : 0u, std::memory_order_relaxed); // SPLIT VIEW
         if (g_widescreen)
         {
@@ -3238,6 +3250,342 @@ namespace
     // field runs one, after the new display registers are written. In gameplay every flip follows a sceGsSyncV in the
     // same or the next field, so this path does not run there (counted in g_flipVsyncs).
     uint64_t g_flipVsyncs = 0, g_flipVsyncsLogged = 0, g_flipHealthNs = 0;
+
+    // NATIVE RENDERER, step 1 (research): the game draws everything through one call,
+    // PVu1DisplayList::AddCommand(list, command, data) (func_00160CD0; named from the Ghosts to Glory demo's symbols,
+    // MAXDEMOR.ELF): every vu1Set... / vu1Draw... wrapper passes a command number and a small data block. Logging that
+    // stream gives the whole frame at the game's level - matrices, textures, lights, bone matrices and the meshes'
+    // vertex buffers - which is what a native renderer draws from.
+    // MAXIMO_DL_LOG=<file>[,<start seconds>[,<frames>]]: log <frames> game frames (default 2) of commands, starting
+    // <start seconds> (default 30) after boot. Logs hold addresses and numbers, no game data beyond a few words.
+    constexpr uint32_t kDlAddCommandFn = GA(0x00160CD0u);
+    constexpr const char *kDlCommandNames[] = {
+        "?", "WorldMatrix", "ViewMatrix", "ScreenMatrix", "ClipMatrix", "LightDirMatrix", "LightColorMatrix",
+        "CompiledVertices", "RawVertices", "BeginMesh", "EndMesh", "Texture", "TextureEnv", "CompiledBox", "RawBox",
+        "Line", "ClearZBuffer", "DisableZBufferUpdate", "EnableZBufferUpdate", "ResetAlphaEnv", "SetGlobalAlpha",
+        "SetGsRegister", "Vif1Commands", "BeginParticles", "Particles", "EndParticles", "BeginGrid", "Grid", "EndGrid",
+        "Vu1MicroCode", "STAnimFlag", "STAnimMatrix", "RefMapFlag", "ShadowMapFlag", "ShadowMapMatrix", "BeginSprites",
+        "Sprites", "EndSprites", "ClearFrameBuffer", "SetFrameBuffer", "ScissorFlag", "BeginSharedVertices",
+        "EndSharedVertices", "BoneMatrix"};
+    struct DlLog
+    {
+        std::FILE *file = nullptr;
+        double start = 30.0;
+        int frames = 2, framesDone = 0;
+        uint32_t lastFrame = 0;
+        bool armed = false, done = false;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        std::map<uint32_t, uint64_t> counts;
+        std::FILE *bin = nullptr;          // the same frames with their data (dl_log.bin): what the viewer reads
+        uint8_t screen[64] = {};           // the last ScreenMatrix (set once, long before the logged frames)
+        bool haveScreen = false, wroteScreen = false;
+        std::string vramPath;
+    } g_dlLog;
+    // Binary capture: "MXDL" u32 version 1, then records: u32 command (0xFFFFFFFF = new frame, data[0] = the game's
+    // frame counter), u32 data[8], u32 blob count, and per blob u32 kind (1 matrix, 2 vertex buffer, 3 texture env),
+    // u32 PS2 address, u32 size, bytes.
+    void dlBinRecord(uint32_t cmd, const uint32_t *w, std::initializer_list<std::array<uint32_t, 3>> blobs)
+    {
+        if (!g_dlLog.bin)
+            return;
+        std::fwrite(&cmd, 4, 1, g_dlLog.bin);
+        std::fwrite(w, 4, 8, g_dlLog.bin);
+        uint32_t n = 0;
+        for (const auto &b : blobs)
+            if (b[1] && (b[1] & PS2_RAM_MASK) == b[1] && b[2] && b[2] <= 0x100000u)
+                ++n;
+        std::fwrite(&n, 4, 1, g_dlLog.bin);
+        for (const auto &b : blobs)
+            if (b[1] && (b[1] & PS2_RAM_MASK) == b[1] && b[2] && b[2] <= 0x100000u)
+            {
+                std::fwrite(b.data(), 4, 3, g_dlLog.bin);
+                std::fwrite(mem(b[1]), 1, b[2], g_dlLog.bin);
+            }
+    }
+    void dlLogConfigure()
+    {
+        const char *v = std::getenv("MAXIMO_DL_LOG");
+        if (!v || !*v)
+            return;
+        std::string text = v, path = text;
+        const size_t c1 = text.find(',');
+        if (c1 != std::string::npos)
+        {
+            path = text.substr(0, c1);
+            g_dlLog.start = std::atof(text.c_str() + c1 + 1);
+            const size_t c2 = text.find(',', c1 + 1);
+            if (c2 != std::string::npos)
+                g_dlLog.frames = std::max(1, std::atoi(text.c_str() + c2 + 1));
+        }
+        g_dlLog.file = std::fopen(path.c_str(), "w");
+        g_dlLog.armed = g_dlLog.file != nullptr;
+        std::string binPath = path;
+        const size_t dot = binPath.find_last_of('.');
+        const size_t slash = binPath.find_last_of("\\/");
+        binPath = (dot != std::string::npos && (slash == std::string::npos || slash < dot) ? binPath.substr(0, dot) : binPath) + ".bin";
+        if (g_dlLog.armed)
+        {
+            g_dlLog.vramPath = binPath.substr(0, binPath.size() - 4) + "_vram.bin";
+            g_dlLog.bin = std::fopen(binPath.c_str(), "wb");
+            if (g_dlLog.bin)
+                std::fwrite("MXDL\1\0\0\0", 1, 8, g_dlLog.bin);
+        }
+        logf("display list log: %s from %.0f s for %d frame(s)%s", path.c_str(), g_dlLog.start, g_dlLog.frames,
+             g_dlLog.file ? "" : " (could not open the file)");
+    }
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+    // NATIVE RENDERER (step 3, native_renderer.cpp): while it is on (F9, MAXIMO_NATIVE=1), every AddCommand is
+    // copied with the matrix / vertex buffer / texture packet it points at, and the frame is handed to the GS side at
+    // sceGsSyncV (nativeFrameEnd), which draws it with Vulkan in place of the paraLLEl-GS picture.
+    std::unique_ptr<native::Frame> g_nativeFrame; // game thread
+    void nativeCapture(uint32_t cmd, uint32_t data)
+    {
+        if (!g_gpuMode || !native::enabled())
+            return;
+        if (!g_nativeFrame)
+            g_nativeFrame = std::make_unique<native::Frame>();
+        native::Frame &f = *g_nativeFrame;
+        if (f.cmds.size() >= 200000)
+            return;
+        native::Cmd c;
+        c.cmd = cmd;
+        if ((data & PS2_RAM_MASK) == data)
+            for (int i = 0; i < 8; ++i)
+                c.w[i] = rd32(data + 4u * i);
+        uint32_t ptr = 0, size = 0;
+        if (cmd == 43)
+            ptr = c.w[1], size = 64u;
+        else if ((cmd >= 1 && cmd <= 6) || cmd == 31 || cmd == 34)
+            ptr = c.w[0], size = 64u;
+        else if (cmd == 7)
+            ptr = c.w[0], size = c.w[1];
+        else if (cmd == 12)
+            ptr = c.w[0], size = 0xC0u;
+        else if (cmd == 11)
+            ptr = c.w[1], size = 0xC0u;
+        else if (cmd == 8)
+            ptr = c.w[0], size = c.w[1] * 64u;
+        else if (cmd == 36) // sprites: 64 bytes each
+            ptr = c.w[0], size = std::min(c.w[1], 4096u) * 64u;
+        else if (cmd == 24) // particles: 32 bytes each (position + size, colour)
+            ptr = c.w[0], size = std::min(c.w[1], 16384u) * 32u;
+        else if (cmd == 27) // a water grid: its 0x3D0-byte description (corners, colour, matrices)
+            ptr = c.w[0], size = 0x3D0u;
+        if (ptr && (ptr & PS2_RAM_MASK) == ptr && size && size <= 0x100000u && uint64_t(ptr) + size <= PS2_RAM_SIZE)
+        {
+            c.blobOff = static_cast<uint32_t>(f.data.size());
+            c.blobSize = size;
+            const uint8_t *src = mem(ptr);
+            f.data.insert(f.data.end(), src, src + size);
+        }
+        f.cmds.push_back(c);
+    }
+    // F8: write two frames of draw commands with their data, and the GS memory (capture_N.txt / .bin /
+    // _vram.bin in the session's log folder), to study what the native renderer does not draw yet (water...)
+    void armDlCapture()
+    {
+        if (g_dlLog.armed && !g_dlLog.done)
+            return; // one already under way
+        static int n = 0;
+        ++n;
+        const std::string path = "capture_" + std::to_string(n) + ".txt";
+        g_dlLog = DlLog{};
+        g_dlLog.file = std::fopen(path.c_str(), "w");
+        if (!g_dlLog.file)
+        {
+            logf("draw capture: could not open %s", path.c_str());
+            return;
+        }
+        g_dlLog.start = 0.0;
+        g_dlLog.frames = 2;
+        g_dlLog.armed = true;
+        const std::string base = "capture_" + std::to_string(n);
+        g_dlLog.vramPath = base + "_vram.bin";
+        g_dlLog.bin = std::fopen((base + ".bin").c_str(), "wb");
+        if (g_dlLog.bin)
+            std::fwrite("MXDL\1\0\0\0", 1, 8, g_dlLog.bin);
+        logf("draw capture %d: writing %s (F8)", n, path.c_str());
+    }
+    void nativeFrameEnd(uint64_t guestFrame)
+    {
+        static bool f8Was = false;
+        const bool f8 = IsKeyDown(297); // KEY_F8
+        if (f8 && !f8Was)
+            armDlCapture();
+        f8Was = f8;
+        static bool f9Was = false;
+        const bool f9 = IsKeyDown(298); // KEY_F9
+        if (f9 && !f9Was)
+        {
+            native::setEnabled(!native::enabled());
+            logf("native renderer %s (F9)", native::enabled() ? "on" : "off");
+        }
+        f9Was = f9;
+        static bool f10Was = false;
+        const bool f10 = IsKeyDown(299); // KEY_F10: the native renderer's real-time shadows
+        if (f10 && !f10Was && native::enabled())
+        {
+            native::setShadows(!native::shadows());
+            logf("native renderer: real-time shadows %s (F10)", native::shadows() ? "on" : "off");
+        }
+        f10Was = f10;
+        static bool f11Was = false;
+        const bool f11 = IsKeyDown(300); // KEY_F11: the native renderer's per-pixel lighting and highlights
+        if (f11 && !f11Was && native::enabled())
+        {
+            native::setLighting(!native::lighting());
+            logf("native renderer: per-pixel lighting %s (F11)", native::lighting() ? "on" : "off");
+        }
+        f11Was = f11;
+        if (g_nativeFrame)
+        {
+            if (native::enabled() && !g_nativeFrame->cmds.empty())
+            {
+                // Particles and sprites are read again now, at the end of the frame: the game adds their draw
+                // command first and fills the buffer afterwards, so the copy made at the command was the buffer's
+                // previous contents on some frames (smoke and mist coming and going every other frame).
+                for (const native::Cmd &c : g_nativeFrame->cmds)
+                    if ((c.cmd == 24 || c.cmd == 36) && c.blobSize && (c.w[0] & PS2_RAM_MASK) == c.w[0] &&
+                        uint64_t(c.w[0]) + c.blobSize <= PS2_RAM_SIZE &&
+                        size_t(c.blobOff) + c.blobSize <= g_nativeFrame->data.size())
+                        std::memcpy(g_nativeFrame->data.data() + c.blobOff, mem(c.w[0]), c.blobSize);
+                g_nativeFrame->guestFrame = guestFrame;
+                fillNativeHud(g_nativeFrame->hud); // the modern HUD's values
+                native::submitFrame(std::move(g_nativeFrame));
+            }
+            g_nativeFrame.reset();
+        }
+    }
+#endif
+    void dlAddCommandEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+        nativeCapture(reg(ctx, 5), reg(ctx, 6));
+#endif
+        if (g_dlLog.armed && !g_dlLog.done && reg(ctx, 5) == 3)
+        {
+            const uint32_t m = rd32(reg(ctx, 6));
+            if (m && (m & PS2_RAM_MASK) == m)
+            {
+                std::memcpy(g_dlLog.screen, mem(m), 64);
+                g_dlLog.haveScreen = true;
+            }
+        }
+        if (g_dlLog.armed && !g_dlLog.done)
+        {
+            const double t = std::chrono::duration<double>(std::chrono::steady_clock::now() - g_dlLog.t0).count();
+            if (t >= g_dlLog.start)
+            {
+                const uint32_t frame = rd32(kGameFrameCounterAddr);
+                if (frame != g_dlLog.lastFrame)
+                {
+                    if (g_dlLog.lastFrame != 0)
+                        ++g_dlLog.framesDone;
+                    g_dlLog.lastFrame = frame;
+                    if (g_dlLog.framesDone >= g_dlLog.frames)
+                    {
+                        std::fprintf(g_dlLog.file, "# command counts over the logged frames:\n");
+                        for (const auto &c : g_dlLog.counts)
+                            std::fprintf(g_dlLog.file, "#   %-22s %llu\n",
+                                         c.first < std::size(kDlCommandNames) ? kDlCommandNames[c.first] : "?",
+                                         static_cast<unsigned long long>(c.second));
+                        std::fclose(g_dlLog.file);
+                        g_dlLog.file = nullptr;
+                        if (g_dlLog.bin)
+                            std::fclose(g_dlLog.bin);
+                        g_dlLog.bin = nullptr;
+                        g_dlLog.done = true;
+                        logf("display list log written");
+                    }
+                    else
+                    {
+                        std::fprintf(g_dlLog.file, "== game frame %u\n", frame);
+                        const uint32_t fw[8] = {frame};
+                        dlBinRecord(0xFFFFFFFFu, fw, {});
+                        if (g_dlLog.framesDone == 1 && !g_dlLog.vramPath.empty())
+                        {
+                            // The GS memory as it stands for these frames: the textures and palettes the logged
+                            // TextureEnv / Texture commands point at (dl_log_vram.bin, 4 MB).
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+                            if (g_gpuMode && g_gpuShadow)
+                                GpuShadow::requestVramDump(g_dlLog.vramPath.c_str());
+                            else
+#endif
+                                if (std::FILE *v = std::fopen(g_dlLog.vramPath.c_str(), "wb"))
+                                {
+                                    std::fwrite(runtime->memory().getGSVRAM(), 1, PS2_GS_VRAM_SIZE, v);
+                                    std::fclose(v);
+                                }
+                        }
+                    }
+                }
+                if (!g_dlLog.done)
+                {
+                    const uint32_t cmd = reg(ctx, 5), data = reg(ctx, 6);
+                    ++g_dlLog.counts[cmd];
+                    if (g_dlLog.haveScreen && !g_dlLog.wroteScreen && g_dlLog.bin)
+                    {
+                        // The ScreenMatrix, written as a ScreenMatrix record with its 64 bytes inline (address 0).
+                        g_dlLog.wroteScreen = true;
+                        const uint32_t c3 = 3, zero[8] = {}, one = 1, kind = 1, addr = 0, size = 64;
+                        std::fwrite(&c3, 4, 1, g_dlLog.bin);
+                        std::fwrite(zero, 4, 8, g_dlLog.bin);
+                        std::fwrite(&one, 4, 1, g_dlLog.bin);
+                        std::fwrite(&kind, 4, 1, g_dlLog.bin);
+                        std::fwrite(&addr, 4, 1, g_dlLog.bin);
+                        std::fwrite(&size, 4, 1, g_dlLog.bin);
+                        std::fwrite(g_dlLog.screen, 1, 64, g_dlLog.bin);
+                    }
+                    std::fprintf(g_dlLog.file, "%-20s", cmd < std::size(kDlCommandNames) ? kDlCommandNames[cmd] : "?");
+                    uint32_t w[8] = {};
+                    if ((data & PS2_RAM_MASK) == data)
+                        for (int i = 0; i < 8; ++i)
+                            w[i] = rd32(data + 4u * i);
+                    std::fprintf(g_dlLog.file, " data %08X %08X %08X %08X %08X %08X", w[0], w[1], w[2], w[3], w[4], w[5]);
+                    {
+                        const bool isMatrix = (cmd >= 1 && cmd <= 6) || cmd == 31 || cmd == 34 || cmd == 43;
+                        if (cmd == 43) // BoneMatrix: data = bone index, PMat4*
+                            dlBinRecord(cmd, w, {{{1u, w[1], 64u}}});
+                        else if (isMatrix)
+                            dlBinRecord(cmd, w, {{{1u, w[0], 64u}}});
+                        else if (cmd == 7)
+                            dlBinRecord(cmd, w, {{{2u, w[0], w[1]}}});
+                        else if (cmd == 8)
+                            dlBinRecord(cmd, w, {{{2u, w[0], w[1] * 64u}}});
+                        else if (cmd == 12)
+                            dlBinRecord(cmd, w, {{{3u, w[0], 0xC0u}}});
+                        else if (cmd == 11)
+                            dlBinRecord(cmd, w, {{{3u, w[1], 0xC0u}}});
+                        else if ((cmd == 22 || cmd == 24 || cmd == 27 || cmd == 36) && w[0] < PS2_RAM_SIZE - 0x1000u)
+                            dlBinRecord(cmd, w, {{{4u, w[0], 0x1000u}}}); // particles, sprites, grid, VIF: 4 KB to study
+                        else
+                            dlBinRecord(cmd, w, {});
+                    }
+                    const bool matrix = (cmd >= 1 && cmd <= 6) || cmd == 31 || cmd == 34 || cmd == 43;
+                    const uint32_t mptr = cmd == 43 ? w[1] : w[0];
+                    if (matrix && mptr && (mptr & PS2_RAM_MASK) == mptr)
+                    {
+                        std::fprintf(g_dlLog.file, " |");
+                        for (int i = 0; i < 16; ++i)
+                        {
+                            float f;
+                            std::memcpy(&f, mem(mptr + 4u * i), 4);
+                            std::fprintf(g_dlLog.file, " %.4g", f);
+                        }
+                    }
+                    if ((cmd == 7 || cmd == 8) && w[0] && (w[0] & PS2_RAM_MASK) == w[0])
+                    {
+                        // The vertex buffer's first words: the VIF codes (compiled) or the first vertex (raw).
+                        std::fprintf(g_dlLog.file, " | buf");
+                        for (int i = 0; i < 8; ++i)
+                            std::fprintf(g_dlLog.file, " %08X", rd32(w[0] + 4u * i));
+                    }
+                    std::fprintf(g_dlLog.file, "\n");
+                }
+            }
+        }
+        g_original[slotOf(ctx->pc)](rdram, ctx, runtime);
+    }
 
     void putDispEnvEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
     {
@@ -3971,6 +4319,18 @@ namespace
     constexpr uint32_t kGamePlayerAddr = GA(0x00263540u), kSetAbilityFn = GA(0x0012CE10u);
     constexpr uint32_t kVarLives = 4, kVarKoins = 5, kVarKeys = 7, kVarSouls = 6; // (6: souls, the HUD's "spirit", cap 999)
     uint32_t gameVarAddr(uint32_t var) { return kGamePlayerAddr + 0x48u + var * 4u; }
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+    // MODERN HUD (native renderer): the player's game variables, a full life's health and the boss flag, each frame
+    void fillNativeHud(native::HudState &h)
+    {
+        const uint32_t vm = rd32(kLevelVmPtr);
+        h.valid = vm && (vm & PS2_RAM_MASK) == vm && rd32(kLevelExitCodeAddr) == 0 ? 1u : 0u;
+        for (uint32_t i = 0; i < 17; ++i)
+            h.vars[i] = static_cast<int32_t>(rd32(gameVarAddr(i)));
+        h.healthMax = static_cast<int32_t>(rd32(GA(0x00238ABCu)) * 2u);
+        h.boss = rd32(GA(0x00239890u) + 0x8B8u) != 0u ? 1u : 0u;
+    }
+#endif
     constexpr float kGameSpeeds[] = {0.25f, 0.5f, 1.0f, 2.0f, 3.0f};
     constexpr const char *kGameSpeedNames[] = {"0.25X", "0.5X", "1X (NORMAL)", "2X", "3X"};
     // GIVE ABILITY: SetAbility straight on the player, as the sorceresses' scripts and the pickups do. 25 and 26 do
@@ -13852,6 +14212,14 @@ int main(int argc, char **argv)
     runtime.replaceFunction(kParticlesFn, pausableEntry);
     runtime.replaceFunction(kParticlesExtraFn, pausableEntry);
     runtime.replaceFunction(GA(0x001AA1C0u), putDispEnvEntry); // sceGsPutDispEnv: GPU-mode movie presentation
+    dlLogConfigure();
+#ifdef MAXIMO_ENABLE_GPU_SHADOW
+    // The draw command stream: the native renderer (F9) and the research log (MAXIMO_DL_LOG).
+    runtime.replaceFunction(kDlAddCommandFn, dlAddCommandEntry);
+#else
+    if (g_dlLog.armed)
+        runtime.replaceFunction(kDlAddCommandFn, dlAddCommandEntry); // NATIVE RENDERER research: the draw command stream
+#endif
     if (g_objectBudget > kObjectBudgetVanilla)
     {
         runtime.replaceFunction(kVmCtorFn, objectBudgetCtorEntry);
