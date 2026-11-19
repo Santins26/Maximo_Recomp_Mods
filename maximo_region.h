@@ -163,6 +163,7 @@ namespace maximo_region
         {0x15FF30u, 0x1873A0u}, // start
         {0x160960u, 0x187DD0u}, // start
         {0x160B40u, 0x187FB0u}, // start
+        {0x160CD0u, 0x188140u}, // start (PVu1DisplayList::AddCommand; native renderer research)
         {0x160DA0u, 0x188210u}, // start
         {0x160E14u, 0x188284u}, // exact
         {0x160F20u, 0x188390u}, // start
@@ -199,6 +200,7 @@ namespace maximo_region
         {0x19B100u, 0x11B118u}, // start
         {0x19B2B8u, 0x11B2D0u}, // start
         {0x19C3E8u, 0x11C400u}, // start
+        {0x15FA40u, 0x186EB0u}, // start (texture file loader)
         {0x1A08A0u, 0x196398u}, // start
         {0x1A10B0u, 0x196BA8u}, // start
         {0x1A1928u, 0x197420u}, // start
@@ -500,6 +502,7 @@ namespace maximo_region
         {0x15FF30u, 0x1876A0u}, // start
         {0x160960u, 0x1880D0u}, // start
         {0x160B40u, 0x1882B0u}, // start
+        {0x160CD0u, 0x188440u}, // start (PVu1DisplayList::AddCommand; native renderer research)
         {0x160DA0u, 0x188510u}, // start
         {0x160E14u, 0x188584u}, // exact
         {0x160F20u, 0x188690u}, // start
@@ -536,6 +539,7 @@ namespace maximo_region
         {0x19B100u, 0x11B118u}, // start
         {0x19B2B8u, 0x11B2D0u}, // start
         {0x19C3E8u, 0x11C400u}, // start
+        {0x15FA40u, 0x1871B0u}, // start (texture file loader)
         {0x1A08A0u, 0x196688u}, // start
         {0x1A10B0u, 0x196E98u}, // start
         {0x1A1928u, 0x197710u}, // start

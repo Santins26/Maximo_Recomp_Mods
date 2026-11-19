@@ -1132,6 +1132,34 @@ namespace
              kFlagHandleMax);
     }
 
+    // ---- texture slot log ------------------------------------------------------------------------------------------
+    // The game's texture manager has 512 slots (0x200 entries of 0x2C bytes; an entry is in use while its size word at
+    // +8 is non-zero). func_0015FA40 (container, file, count, flags) adds one file's textures through the manager at
+    // [container + 0x804] and returns 0 when a texture finds no free slot: a level whose .TEX fails that way loses its
+    // .PSX (no floor). One line per texture file: slots in use before and after, and whether it fitted.
+    void texSlotsEntry(uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime)
+    {
+        if (ctx->pc != GA(0x0015FA40u))
+        {
+            g_original[slotOf(ctx->pc)](rdram, ctx, runtime);
+            return;
+        }
+        const uint32_t manager = rd32(reg(ctx, 4) + 0x804u), count = reg(ctx, 6);
+        auto used = [&]() {
+            uint32_t n = 0;
+            for (uint32_t i = 0; manager && i < 0x200u; ++i)
+                n += rd32(manager + i * 0x2Cu + 8u) != 0;
+            return n;
+        };
+        const uint32_t before = used();
+        g_original[slotOf(ctx->pc)](rdram, ctx, runtime);
+        const uint32_t after = used(), ok = reg(ctx, 2);
+        std::printf("[tex-slots] %u texture(s) added: %u -> %u of 512 slots%s\n", count, before, after,
+                    ok ? "" : "  FAILED: no free slot, this file's level loses its geometry");
+        std::fflush(stdout);
+        logf("tex-slots: %u added, %u -> %u of 512%s", count, before, after, ok ? "" : " FAILED");
+    }
+
     // ---- the game's memory pools with extended RAM (MAXIMO_RAM=64) -------------------------------------------------
     // The static constructor sinit_001EA400 tail-jumps into func_001811D0(heap object 0x2393B0), which mallocs one
     // block for all of the game's pools: 0x2000000 - [0x238EDC] (main stack size, 0xB5000) - [0x238ED8] (heap start,
@@ -14220,6 +14248,7 @@ int main(int argc, char **argv)
     if (g_dlLog.armed)
         runtime.replaceFunction(kDlAddCommandFn, dlAddCommandEntry); // NATIVE RENDERER research: the draw command stream
 #endif
+    runtime.replaceFunction(GA(0x0015FA40u), texSlotsEntry); // one log line per texture file
     if (g_objectBudget > kObjectBudgetVanilla)
     {
         runtime.replaceFunction(kVmCtorFn, objectBudgetCtorEntry);
