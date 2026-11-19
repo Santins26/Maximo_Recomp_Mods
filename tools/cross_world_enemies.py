@@ -60,7 +60,7 @@ SOUND_DIRS = ("SOUND", "FSOUND", "GSOUND", "ISOUND", "SSOUND")
 RESOURCE_POOL_EXPANDED = 0x640000 * 4  # the +0x260 pool with MAXIMO_RAM=more (kMidPoolScale in maximo_boot.cpp)
 OCCUPANCY = 0.904                      # the randomizer's measured safe occupancy (roster_selection.LOADED_MAX_PCT)
 STAMP = "crossworld_applied.txt"
-VERSION = "13"  # 13: arenas also get the ghost and the wooden chest (survival); 12: arenas keep their own sound bank, every bank holds every sound, common enemies bring their companions
+VERSION = "15"  # 15: every world stays inside the game's 512 texture slots (Castle Sub 1 lost its level: no floor); 14: arenas keep 140 palettes (black and red skeletons and chests in survival); 13: arenas also get the ghost and the wooden chest (survival); 12: arenas keep their own sound bank, every bank holds every sound, common enemies bring their companions
 DRIVER = Path("PSXIRX") / "MJOLNIR.IRX"
 SOUND_ENTRIES = 1000  # effects per bank with the patched driver (each world needs about 340)
 
@@ -305,6 +305,60 @@ EXTRA_TARGETS = (
     ("king arena", "castle", "CASTLE", "CASTLE_K", "BS_KING", "grave"),
     ("queen arena", "castle", "CASTLE", "CASTLE_Q", "BS_QUEEN", "grave"),
 )
+# TEXTURE SLOTS. The game's texture manager has 512 slots (TextureManager: 0x200 entries of 0x2C bytes, its add loop
+# stops at 0x200 and the load fails), shared by everything resident while a level plays: GLOBAL, FONT, FX and the
+# interface, the world's archive, the level's .TEX and its sky's .TEX. When a level's .TEX does not fit, the game skips
+# that level's .PSX without a word: no floor, Maximo falls, and the world's old archive name is used (measured: Castle
+# Sub 1 with the cross-world CASTLE.PRT at 245 textures needed 516). So each archive keeps at most what its largest
+# level leaves free, under the 508 its fullest working level (Graveyard Hub) was seen to use.
+TEXTURE_SLOTS_SAFE = 508
+GLOBAL_TEXTURE_FILES = ("GAME/GLOBAL.PRT", "GAME/FONT.PRT", "FX/FX.PRT", "GAME/INTRFACE.TEX")
+# archive stem -> the (level .TEX, sky .TEX) pairs that play with it (the LevelTable's rows: its .PSX and its sky)
+ARCHIVE_LEVELS = {
+    "GRAVE": [("GRAVE/G_INTRO", "GRAVE/G_SKY"), ("GRAVE/G_HUB", "GRAVE/G_SKY"), ("GRAVE/G_SUB1", "GRAVE/G_SKY"),
+              ("GRAVE/G_SUB2", "GRAVE/G_SKY"), ("GRAVE/G_INTROB", "GRAVE/G_SKY"), ("GRAVE/G_BONUS", "GRAVE/G_SKY")],
+    "GRAVE_B": [("GRAVE/G_BOSS", "GRAVE/G_SKY")],
+    "SWAMP": [("SWAMP/S_INTRO", "SWAMP/S_SKY"), ("SWAMP/S_HUB", "SWAMP/S_SKY"), ("SWAMP/S_SUB1", "SWAMP/S_SKY"),
+              ("SWAMP/S_SUB2", "SWAMP/S_SKY"), ("SWAMP/S_SUB3", "SWAMP/S_SKY")],
+    "SWAMP_B": [("SWAMP/S_BOSS", "SWAMP/S_SKY")],
+    "ICE": [("ICESHIP/I_INTRO", "ICESHIP/I_SKY"), ("ICESHIP/I_HUB", "ICESHIP/I_SKY"), ("ICESHIP/I_SUB1", "ICESHIP/I_SKY"),
+            ("ICESHIP/I_SUB2", "ICESHIP/I_SKY"), ("ICESHIP/I_SUB3", "ICESHIP/I_SKY")],
+    "ICE_B": [("ICESHIP/I_BOSS", "ICESHIP/I_BSKY")],
+    "UNDER": [("UNDER/U_INTRO", "UNDER/U_SKY"), ("UNDER/U_HUB", "UNDER/U_SKY"), ("UNDER/U_SUB1", "UNDER/U_SKY"),
+              ("UNDER/U_SUB2", "UNDER/U_SKY"), ("UNDER/U_SUB3", "UNDER/U_SKY")],
+    "UNDER_B": [("UNDER/U_BOSS", "UNDER/U_SKY")],
+    "CASTLE": [("CASTLE/C_INTRO", "CASTLE/C_SKY2"), ("CASTLE/C_HUB", "CASTLE/C_SKY"), ("CASTLE/C_SUB1", "CASTLE/C_SKY"),
+               ("CASTLE/C_SUB2", None)],
+    "CASTLE_K": [("CASTLE/C_KING", "CASTLE/K_SKY")],
+    "CASTLE_Q": [("CASTLE/C_QUEEN", "CASTLE/Q_SKY")],
+}
+STRUCT_TEXTURE_CAP = {}    # archive stem -> textures its archive may hold after the structures (set by a retry)
+STRUCT_TEXTURES = {}       # (archive stem, structure) -> textures that structure added (measured on the last pass)
+AFTER_STRUCTURES = {}      # archive stem -> textures after the structures (last pass)
+
+
+def texture_count(prt: bytes) -> int:
+    """A .PRT / .TEX file's texture count (its header's second count)."""
+    return struct.unpack_from("<I", prt, 12)[0] if len(prt) >= 16 else 0
+
+
+def texture_limit(psxdata: Path, stem: str):
+    """How many textures archive `stem` may hold so that every level playing with it fits the texture slots."""
+    def count(rel):
+        if rel is None:
+            return 0
+        for path in (psxdata / f"{rel}.TEX", psxdata / rel):
+            if path.is_file():
+                with open(path, "rb") as f:
+                    return texture_count(f.read(16))
+        return 0
+    levels = ARCHIVE_LEVELS.get(stem)
+    if not levels:
+        return None
+    resident = sum(count(r) for r in GLOBAL_TEXTURE_FILES)
+    return TEXTURE_SLOTS_SAFE - resident - max(count(lv) + count(sky) for lv, sky in levels)
+
+
 # The menu level (GAME/SELECT) is left out: porting into it ran out of memory in testing (killed at 8 GB).
 
 
@@ -341,6 +395,8 @@ COMMON_ENEMIES = (0x47, 0x39, 0x54, 0x2F, 0x48, 0x6A)
 # Also into every arena, for survival: the Ghost and the Wooden Chest (with what each spawns: the chest's mimic,
 # wizard and prizes).
 ARENA_EXTRAS = (0x6B, 0x25)
+# Palettes an arena's world file may keep (the arena's level uses the rest of the game's 175).
+ARENA_PALETTES = 140
 
 def neutralize(blob, _bs, game_vars=False):
     """Every `push imm8|imm32; popapiparam; callapi <api>` for the level exit and the boss camera flag -> 5 or 8 nops
@@ -721,7 +777,32 @@ def main() -> int:
         lock.unlink(missing_ok=True)
 
 
+TEXTURE_OVERFLOW = {}  # archive stem -> textures over its limit on the last pass
+
+
 def run(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sound_bank, log, detail) -> int:
+    """Ports every world; again (from the originals) while an archive is past its texture slots, each time leaving
+    out structures (the debug menu's props: the least needed) until it fits."""
+    result = 1
+    for attempt in range(4):
+        TEXTURE_OVERFLOW.clear()
+        result = _run_once(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sound_bank, log)
+        if not TEXTURE_OVERFLOW:
+            break
+        for stem, over in TEXTURE_OVERFLOW.items():
+            base = STRUCT_TEXTURE_CAP.get(stem, AFTER_STRUCTURES.get(stem, 0))
+            STRUCT_TEXTURE_CAP[stem] = max(0, min(base, AFTER_STRUCTURES.get(stem, base)) - over)
+        print(f"cross-world: again, inside the texture slots ({', '.join(f'{k} {v} over' for k, v in TEXTURE_OVERFLOW.items())})",
+              flush=True)
+    else:
+        print("cross-world: WARNING: some worlds still have more textures than their levels leave free: "
+              + ", ".join(TEXTURE_OVERFLOW), flush=True)
+    if detail:
+        detail.close()
+    return result
+
+
+def _run_once(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sound_bank, log) -> int:
     from randomizer import bef as _bef, befscript as _bs
     save_originals(args.disc, backup)
     restore(args.disc, backup)  # every run starts from the originals: nothing of an earlier run is left over
@@ -787,6 +868,9 @@ def run(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sou
         targets = [(w, w, folder, stem, stem, None) for w, (folder, stem) in WORLDS.items()]
         if getattr(args, "arenas", True):
             targets += [t for t in EXTRA_TARGETS if (work / f"{t[3]}.BEF").is_file()]
+        if os.environ.get("CROSSWORLD_ONLY"):  # (testing: only these archives, e.g. CASTLE,CASTLE_K)
+            only = {x.strip().upper() for x in os.environ["CROSSWORLD_ONLY"].split(",")}
+            targets = [t for t in targets if t[3] in only]
         for label, world, folder, stem, bank, second_world in targets:
             print(f"cross-world: {label.upper()}...", flush=True)
             kept_results = []  # what the arena's extra passes ported and kept (they get sounds too)
@@ -822,10 +906,18 @@ def run(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sou
                     if len(session.prs) + len(session.prt) + int(row.resident_bytes) > ceiling:
                         struct_skipped.append(f"{entry.name} (pool full)")
                         continue
+                    # (the texture slots: a retry leaves out what does not fit the cap its archive was given)
+                    tex_before = texture_count(session.prt)
+                    cap = STRUCT_TEXTURE_CAP.get(stem)
+                    if cap is not None and tex_before + STRUCT_TEXTURES.get((stem, entry.name), 0) > cap:
+                        struct_skipped.append(f"{entry.name} (texture slots full)")
+                        continue
                     ok, why = cross_world.port_structure_route(
                         session, type_id=tid, name=entry.name, source_world=entry.source_world,
                         companions=tuple(row.companions), game_files_dir=work, emit=log)
+                    STRUCT_TEXTURES[(stem, entry.name)] = texture_count(session.prt) - tex_before
                     (struct_ok if ok else struct_skipped).append(entry.name if ok else f"{entry.name} ({why})")
+                AFTER_STRUCTURES[stem] = texture_count(session.prt)
                 print(f"cross-world: {world.upper()}: structures {len(struct_ok)} ported"
                       + (f", skipped: {'; '.join(struct_skipped)}" if struct_skipped else ""), flush=True)
             size = len(session.prs) + len(session.prt)
@@ -948,11 +1040,21 @@ def run(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sou
                     boss_members += [SimpleNamespace(type_id=m, source_world=arena.lower(),
                                                      name=f"{bname} 0x{m:02X}") for m in members]
             prt = (work / f"{stem}.PRT").read_bytes()
+            limit = texture_limit(psxdata, stem)
+            if limit is not None and texture_count(prt) > limit:
+                over = texture_count(prt) - limit
+                TEXTURE_OVERFLOW[stem] = over
+                print(f"cross-world: {label.upper()}: {texture_count(prt)} textures, {over} more than its levels leave "
+                      f"free ({limit}); some structures will be left out", flush=True)
             protect = struct.unpack_from("<I", (originals / folder / f"{stem}.PRT").read_bytes(), 12)[0]
-            prt, converted = fit_palettes(prt, 175, protect, texture_port)
+            # A boss arena keeps fewer: its own level loads palettes of its own into the same 175-entry table, and
+            # with the world's file at the full 175 the last ones (the common enemies' and the chest's, ported last)
+            # came out black and red in survival. The smallest ported textures become 24-bit instead.
+            palettes = ARENA_PALETTES if second_world else 175
+            prt, converted = fit_palettes(prt, palettes, protect, texture_port)
             if converted:
                 (work / f"{stem}.PRT").write_bytes(prt)
-                log(f"{world}: {converted} ported texture(s) made 24-bit to keep 175 palettes")
+                log(f"{label}: {converted} ported texture(s) made 24-bit to keep {palettes} palettes")
             size = (work / f"{stem}.PRS").stat().st_size + len(prt)
 
             for ext in ("BEF", "PRS", "PRT"):
@@ -1007,8 +1109,6 @@ def run(args, psxdata, backup, randomizer, catalog, cross_world, sound_port, sou
                            f"{size / 1048576:.1f} MB of models and textures; {sound_note}"
                            + (f"; refused: {', '.join(refused + boss_refused)}" if refused or boss_refused else ""))
 
-    if detail:
-        detail.close()
     for line in summary:
         print(f"cross-world: {line}", flush=True)
     stamp_lines = [f"version={VERSION}-{args.sound_ram_mb}-{args.clut_table}-{args.pool_scale}"] + [f"{rel}={md5(args.disc / rel)}" for rel in written]
