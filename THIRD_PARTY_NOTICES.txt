@@ -37,6 +37,9 @@ A build of this project uses the following open-source software. Their licence t
     (MIT, LICENSES\lcms2-MIT.txt).
   - Brotli 1.0.9 (game\brotlicommon.dll, brotlidec.dll, brotlienc.dll): MIT (LICENSES\brotli-MIT.txt).
   - zlib 1.3.1 (game\zlib1.dll): zlib licence (LICENSES\zlib.txt).
+- Liberation Serif Bold (Liberation Fonts 2.1.5, https://github.com/liberationfonts): the native renderer's modern
+  HUD draws its digits from an image of this font's glyphs (shaders\native\hud_atlas.h, made by
+  tools\mkhudatlas.py). SIL Open Font License 1.1 (LICENSES\LiberationFonts-OFL.txt).
 - Microsoft Visual C++ runtime (game\msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll), redistributed under the
   Microsoft Visual Studio licence terms.
 
