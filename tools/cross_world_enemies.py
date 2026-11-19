@@ -60,7 +60,7 @@ SOUND_DIRS = ("SOUND", "FSOUND", "GSOUND", "ISOUND", "SSOUND")
 RESOURCE_POOL_EXPANDED = 0x640000 * 4  # the +0x260 pool with MAXIMO_RAM=more (kMidPoolScale in maximo_boot.cpp)
 OCCUPANCY = 0.904                      # the randomizer's measured safe occupancy (roster_selection.LOADED_MAX_PCT)
 STAMP = "crossworld_applied.txt"
-VERSION = "15"  # 15: every world stays inside the game's 512 texture slots (Castle Sub 1 lost its level: no floor); 14: arenas keep 140 palettes (black and red skeletons and chests in survival); 13: arenas also get the ghost and the wooden chest (survival); 12: arenas keep their own sound bank, every bank holds every sound, common enemies bring their companions
+VERSION = "16"  # 16: every archive fits beside the largest level of any world, with 12 slots spare (the previous world's archive is still loaded while the next level's .TEX loads); 15: every world stays inside the game's 512 texture slots (Castle Sub 1 lost its level: no floor); 14: arenas keep 140 palettes (black and red skeletons and chests in survival); 13: arenas also get the ghost and the wooden chest (survival); 12: arenas keep their own sound bank, every bank holds every sound, common enemies bring their companions
 DRIVER = Path("PSXIRX") / "MJOLNIR.IRX"
 SOUND_ENTRIES = 1000  # effects per bank with the patched driver (each world needs about 340)
 
@@ -311,7 +311,10 @@ EXTRA_TARGETS = (
 # that level's .PSX without a word: no floor, Maximo falls, and the world's old archive name is used (measured: Castle
 # Sub 1 with the cross-world CASTLE.PRT at 245 textures needed 516). So each archive keeps at most what its largest
 # level leaves free, under the 508 its fullest working level (Graveyard Hub) was seen to use.
-TEXTURE_SLOTS_SAFE = 508
+# The previous world's archive is still loaded while the next level's .TEX and .PSX load (measured: Graveyard intro ->
+# Castle Sub 1 failed with GRAVE.PRT at 245 resident), so an archive must fit beside the largest level of ANY world,
+# and 12 slots stay spare for what the game adds at run time.
+TEXTURE_SLOTS_SAFE = 500
 GLOBAL_TEXTURE_FILES = ("GAME/GLOBAL.PRT", "GAME/FONT.PRT", "FX/FX.PRT", "GAME/INTRFACE.TEX")
 # archive stem -> the (level .TEX, sky .TEX) pairs that play with it (the LevelTable's rows: its .PSX and its sky)
 ARCHIVE_LEVELS = {
@@ -356,7 +359,8 @@ def texture_limit(psxdata: Path, stem: str):
     if not levels:
         return None
     resident = sum(count(r) for r in GLOBAL_TEXTURE_FILES)
-    return TEXTURE_SLOTS_SAFE - resident - max(count(lv) + count(sky) for lv, sky in levels)
+    largest = max(count(lv) + count(sky) for pairs in ARCHIVE_LEVELS.values() for lv, sky in pairs)
+    return TEXTURE_SLOTS_SAFE - resident - largest
 
 
 # The menu level (GAME/SELECT) is left out: porting into it ran out of memory in testing (killed at 8 GB).
