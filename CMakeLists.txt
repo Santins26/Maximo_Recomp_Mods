@@ -93,7 +93,9 @@ if(MAXIMO_ENABLE_GPU_SHADOW)
     set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL CACHE STRING "" FORCE)
     add_subdirectory(${MAXIMO_PARALLEL_GS_DIR} parallel-gs)
     set(CMAKE_CXX_STANDARD 20)
-    target_sources(maximo_boot PRIVATE gpu_shadow.cpp)
+    target_sources(maximo_boot PRIVATE gpu_shadow.cpp native_renderer.cpp)
+    # NATIVE RENDERER (F9): SPIR-V in shaders/native/native_spv.h (from native.vert / native.frag).
+    target_include_directories(maximo_boot PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/shaders/native)
     target_compile_definitions(maximo_boot PRIVATE MAXIMO_ENABLE_GPU_SHADOW=1)
     target_link_libraries(maximo_boot PRIVATE parallel-gs)
     # MAXIMO_SMAA: SPIR-V in shaders/smaa/smaa_spv.h; the area/search lookup tables come from Granite (MIT).
