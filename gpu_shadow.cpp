@@ -9,6 +9,7 @@
 #include "hdtex/hdtex_runtime.h"
 #include "thread_id.hpp"
 #include "shaders/slangmosh.hpp"
+#include "native_renderer.h"
 // MAXIMO_SMAA: Granite's SMAA shaders as SPIR-V (shaders/smaa/build_smaa_spv.sh) and SMAA's lookup tables
 // (Granite/tools/smaa; SMAA is MIT, Jorge Jimenez et al.).
 #include "smaa_spv.h"
@@ -32,6 +33,12 @@
 #include <utility>
 #include <vector>
 
+// NATIVE RENDERER (native_renderer.cpp): draws the frame from the game's own draw commands.
+namespace native
+{
+Vulkan::ImageHandle render(Vulkan::Device &device, uint32_t width, uint32_t height, uint64_t guestFrame);
+}
+
 // POST EFFECTS level (0 off, 1 soft, 2 strong): set by the debug menu (game thread), read by the GS worker.
 namespace
 {
@@ -46,6 +53,13 @@ static std::atomic<int> g_gpuLightLevel{[] {
 }()};
 void GpuShadow::setLightLevel(int level) { g_gpuLightLevel.store(std::clamp(level, 0, 4), std::memory_order_relaxed); }
 int GpuShadow::lightLevel() { return g_gpuLightLevel.load(std::memory_order_relaxed); }
+static std::mutex g_vramDumpMutex;
+static std::string g_vramDumpPath;
+void GpuShadow::requestVramDump(const char *path)
+{
+    std::lock_guard<std::mutex> lock(g_vramDumpMutex);
+    g_vramDumpPath = path ? path : "";
+}
 void GpuShadow::setPostLevel(int level) { g_gpuPostLevel.store(std::clamp(level, 0, 2), std::memory_order_relaxed); }
 int GpuShadow::postLevel() { return g_gpuPostLevel.load(std::memory_order_relaxed); }
 
@@ -347,6 +361,7 @@ struct GpuShadow::Impl
             workReady.notify_all();
             worker.join();
         }
+        native::shutdown(); // NATIVE RENDERER: its images and buffers go before the device
         savePipelineCache();
         if (stream)
             std::fclose(stream);
@@ -394,6 +409,21 @@ struct GpuShadow::Impl
         workReady.notify_one();
     }
 
+    // NATIVE EXCLUSIVE: paraLLEl-GS skipping the GS commands while the native renderer has the screen
+    std::atomic<bool> gsSkip{false};
+    void resumeGs()
+    {
+        // its GS memory missed the uploads while skipping: copied back from the native renderer's copy
+        if (const uint8_t *m = native::mirror())
+            if (void *dst = gs.map_vram_write(0, PS2_GS_VRAM_SIZE))
+            {
+                std::memcpy(dst, m, PS2_GS_VRAM_SIZE);
+                gs.end_vram_write(0, PS2_GS_VRAM_SIZE);
+            }
+        gsSkip.store(false, std::memory_order_relaxed);
+        native::setGsSkipped(false);
+    }
+
     void waitForWorker(bool idle)
     {
         std::unique_lock<std::mutex> lock(workMutex);
@@ -419,7 +449,10 @@ struct GpuShadow::Impl
             {
                 uint32_t header[2];
                 std::memcpy(header, item.packets.data() + at, sizeof(header));
-                gs.gif_transfer(header[0], item.packets.data() + at + 16, header[1]);
+                if (native::tracking())
+                    native::gifPacket(header[0], item.packets.data() + at + 16, header[1]);
+                if (!gsSkip.load(std::memory_order_relaxed))
+                    gs.gif_transfer(header[0], item.packets.data() + at + 16, header[1]);
                 at += 16 + ((size_t(header[1]) + 15) & ~size_t(15));
             }
             if (item.vsync && !processVsync(item.guestFrame, false, item.priv))
@@ -1399,6 +1432,19 @@ struct GpuShadow::Impl
     // The device side of a guest vsync: on the GS worker, or on the game thread.
     bool processVsync(uint64_t guestFrame, bool capture, const PrivSnapshot &priv)
     {
+        {
+            std::string dumpPath;
+            {
+                std::lock_guard<std::mutex> lock(g_vramDumpMutex);
+                dumpPath.swap(g_vramDumpPath);
+            }
+            if (!dumpPath.empty())
+            {
+                const auto *vram = static_cast<const uint8_t *>(gs.map_vram_read(0, PS2_GS_VRAM_SIZE));
+                const bool ok = vram && writeFile(dumpPath.c_str(), vram, PS2_GS_VRAM_SIZE);
+                std::fprintf(stderr, "[gpu] VRAM written to %s: %s\n", dumpPath.c_str(), ok ? "ok" : "failed");
+            }
+        }
         if (hdtex)
             hdtex->endFrame(guestFrame);
         // MAXIMO_GS_DRAW_LOG=<guest frame>: log that frame's render passes and draw states (stderr, [drawlog]).
@@ -1439,10 +1485,47 @@ struct GpuShadow::Impl
         ++vsyncs;
         if (vsyncs == 3600) // (a minute in: most pipelines exist by then)
             savePipelineCache();
+        // NATIVE RENDERER (F9): this GS frame's texture binds are complete; the matching native frame replaces the
+        // paraLLEl-GS picture at the same size. The GS memory copy it follows the stream from is taken here once.
+        bool nativeShown = false;
+        // (F9 off while paraLLEl-GS was not drawing: bring its GS memory up to date from the native renderer's
+        // copy before that copy goes)
+        if (gsSkip.load(std::memory_order_relaxed) && !native::enabled())
+            resumeGs();
+        if (native::tracking())
+            native::endGsFrame(guestFrame);
+        if (presenting && !capture && scanout.image && native::enabled())
+        {
+            if (Vulkan::ImageHandle image = native::render(device, scanout.image->get_width(),
+                                                           scanout.image->get_height(), guestFrame))
+            {
+                scanout.image = image;
+                nativeShown = true;
+            }
+        }
+        // NATIVE EXCLUSIVE (MAXIMO_NATIVE_EXCLUSIVE=0 turns it off): while the native picture is on screen,
+        // paraLLEl-GS stops drawing the game's GS commands (the native renderer still follows them for the
+        // textures). Its picture was being drawn at full quality and thrown away every frame: half the work.
+        {
+            static const bool exclusive = envFlag("MAXIMO_NATIVE_EXCLUSIVE", true);
+            const bool skip = exclusive && presenting && nativeShown && native::enabled() && native::tracking();
+            if (skip && !gsSkip.load(std::memory_order_relaxed))
+            {
+                gsSkip.store(true, std::memory_order_relaxed);
+                native::setGsSkipped(true);
+            }
+            else if (!skip && gsSkip.load(std::memory_order_relaxed))
+                resumeGs();
+        }
+        if (native::needsSeed())
+        {
+            if (const auto *vram = static_cast<const uint8_t *>(gs.map_vram_read(0, PS2_GS_VRAM_SIZE)))
+                native::seed(vram);
+        }
         if (smaa && presenting && !capture && !syncReadback && scanout.image)
             scanout.image = applySmaa(guestFrame, scanout.image);
         // Scene lighting from the scene depth the Maximo ubershader records (the game's Z buffer is nearly empty).
-        if (presenting && !capture && !syncReadback && scanout.image && GpuShadow::lightLevel() > 0)
+        if (presenting && !capture && !syncReadback && scanout.image && !nativeShown && GpuShadow::lightLevel() > 0)
             scanout.image = applyLighting(guestFrame, scanout, GpuShadow::lightLevel());
         if (fsr && presenting && !capture && !syncReadback && scanout.image)
             scanout.image = applyFsr(guestFrame, scanout.image);
@@ -1626,7 +1709,12 @@ void GpuShadow::submitPacket(GifPathId path, const uint8_t *data, uint32_t size)
         if (impl->useWorker)
             impl->queuePacket(static_cast<uint32_t>(path), data, size);
         else
-            impl->gs.gif_transfer(static_cast<uint32_t>(path), data, size);
+        {
+            if (native::tracking())
+                native::gifPacket(static_cast<uint32_t>(path), data, size);
+            if (!impl->gsSkip.load(std::memory_order_relaxed))
+                impl->gs.gif_transfer(static_cast<uint32_t>(path), data, size);
+        }
         ++impl->packets;
     }
 }

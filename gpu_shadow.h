@@ -50,6 +50,10 @@ public:
     static void setLightLevel(int level);
     static int lightLevel();
 
+    // NATIVE RENDERER research: write the GS local memory (4 MB, the textures and palettes as the game left them)
+    // to <path> at the next guest vsync. Any thread.
+    static void requestVramDump(const char *path);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;
